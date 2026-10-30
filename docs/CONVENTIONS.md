@@ -1,99 +1,99 @@
-# Scribo — Convenções
+# Scribo — Conventions
 
-Estilo da casa. Inviolável durante implementação. Curto de propósito.
-
----
-
-## Código
-
-**Sem comentários. Nenhum.** Nem em Go, nem em SQL, nem em exemplos. Nomes comunicam intenção. Se um trecho precisa de comentário para ser entendido, ele precisa ser reescrito.
-
-**Erros são valores e são tratados.** Nada de `_` engolindo erro fora de casos genuinamente irrelevantes. Erros de domínio carregam código tipado que vira a tag da mensagem no stderr.
-
-**`context.Context` é o primeiro parâmetro** de toda operação que faz I/O, incluindo as chamadas do `Backend`.
-
-**SQL nunca vive nos handlers de subcomando.** Persistência passa por `db.Backend`, sempre. Regra arquitetural inviolável — preserva a porta para Postgres e mantém os handlers testáveis.
-
-**Validação fora, estado dentro.** Tabela, colunas, coerção de valor, resolução de amostra e de entradas, e carga de regras acontecem fora da transação. Leitura do estado atual e do projetado, avaliação de regras e escrita acontecem dentro de uma transação `BEGIN IMMEDIATE`. `SelectRow` e `ProjectedRow` só existem em `Tx`, para que o erro seja impossível de escrever.
-
-**`Tx` não embute `Backend`.** Transação aninhada não existe em SQLite. A interface estreita torna o erro impossível de escrever.
-
-**Stdout limpo no sucesso de escrita.** `upsert` que dá certo não imprime nada, a menos de `--debug`. Erros no stderr. `query`, `export` e `log` produzem dados no stdout.
-
-**Toda escrita é transação explícita.** Mesmo unitária. Atomicidade total, sem exceção.
-
-**Sem valor mágico.** `null` digitado é texto. NULL real só por `--null` ou `null` nativo de JSON.
-
-**Obsolescência nunca é coluna.** É calculada pelo grafo a cada consulta. Nada de flag `stale` gravada que alguém esquece de atualizar.
-
-**Stdlib primeiro. Dependências conscientes da v1: `modernc.org/sqlite` e `github.com/spf13/cobra`. Qualquer adição exige justificativa.
+House style. Inviolable during implementation. Short on purpose.
 
 ---
 
-## Banco
+## Code
 
-**Abertura conforme `CONTRACT.md` §2.** PRAGMAs no DSN, aplicados a toda conexão, com `_txlock=immediate`; lidos de volta; journal mode resolvido pelo filesystem; tabelas do contrato conferidas.
+**No comments. None.** Not in Go, not in SQL, not in examples. Names communicate intent. If a piece of code needs a comment to be understood, it needs to be rewritten.
 
-**Journal mode é detectado, não assumido.** Filesystem de rede nunca abre em WAL. Ver SPEC §3.
+**Errors are values and are handled.** No `_` swallowing an error outside genuinely irrelevant cases. Domain errors carry a typed code that becomes the tag of the message on stderr.
 
-**O Scribo cria só as tabelas do contrato de que é dono e `{table}_history`.** A tabela de dados nunca é criada nem alterada estruturalmente. `schema` gera DDL para o stdout; não executa.
+**`context.Context` is the first parameter** of every operation that does I/O, including the calls of the `Backend`.
 
-**Nunca escrever em tabela do Colligo.** `samples`, `files` e `facts` são só leitura. O que o Scribo tem a dizer sobre uma entrada vai para `input_signals`.
+**SQL never lives in the subcommand handlers.** Persistence always goes through `db.Backend`. An inviolable architectural rule — it preserves the door to Postgres and keeps the handlers testable.
 
-**`CONTRACT.md` é idêntico nos dois repositórios.** Mudança nele é mudança nos dois, no mesmo ciclo, com `contract_version` incrementada.
+**Validation outside, state inside.** Table, columns, value coercion, sample and input resolution, and loading of rules happen outside the transaction. Reading the current and the projected state, evaluating rules and writing happen inside a `BEGIN IMMEDIATE` transaction. `SelectRow` and `ProjectedRow` only exist on `Tx`, so that the error is impossible to write.
 
-**`tool_runs` segue o DDL do `CONTRACT.md`**, distinguida por `tool`. Criar se não existir com aquele DDL exato; se existir com schema diferente, `contract_mismatch`.
+**`Tx` does not embed `Backend`.** A nested transaction does not exist in SQLite. The narrow interface makes the error impossible to write.
 
-**Nunca gravar valor de argumento em `argv_shape`.** Só a forma do comando. É o que impede vazamento por construção.
+**Clean stdout on write success.** An `upsert` that succeeds prints nothing, unless `--debug`. Errors on stderr. `query`, `export` and `log` produce data on stdout.
 
-**Histórico nunca é apagado nem reescrito.** Lacuna detectada vira linha `reconciled`, não correção retroativa.
+**Every write is an explicit transaction.** Even a single one. Total atomicity, without exception.
 
-**Timestamps em UTC, RFC 3339 com milissegundo.**
+**No magic value.** A typed `null` is text. A real NULL only through `--null` or JSON's native `null`.
 
-**`record_key` é array JSON canônico** de pares ordenados pelo nome do campo. Nunca concatenação de strings. Ordenação cronológica é sempre `(changed_at, id)`.
+**Staleness is never a column.** It is computed from the graph on every query. No stored `stale` flag that someone forgets to update.
 
-**Tabelas `STRICT`.**
+**Stdlib first. Conscious dependencies of v1: `modernc.org/sqlite` and `github.com/spf13/cobra`. Any addition requires a justification.
+
+---
+
+## Database
+
+**Opening per `CONTRACT.md` §2.** PRAGMAs in the DSN, applied to every connection, with `_txlock=immediate`; read back; journal mode resolved by the filesystem; contract tables checked.
+
+**Journal mode is detected, not assumed.** A network filesystem never opens in WAL. See SPEC §3.
+
+**Scribo creates only the contract tables it owns and `{table}_history`.** The data table is never created nor structurally altered. `schema` generates DDL to stdout; it does not execute.
+
+**Never write to a Colligo table.** `samples`, `files` and `facts` are read-only. What Scribo has to say about an input goes to `input_signals`.
+
+**`CONTRACT.md` is identical in both repositories.** A change to it is a change to both, in the same cycle, with `contract_version` incremented.
+
+**`tool_runs` follows the DDL of `CONTRACT.md`**, distinguished by `tool`. Create if it does not exist with that exact DDL; if it exists with a different schema, `contract_mismatch`.
+
+**Never store an argument value in `argv_shape`.** Only the shape of the command. It is what prevents leakage by construction.
+
+**History is never deleted nor rewritten.** A detected gap becomes a `reconciled` row, not a retroactive correction.
+
+**Timestamps in UTC, RFC 3339 with millisecond precision.**
+
+**`record_key` is a canonical JSON array** of pairs ordered by field name. Never string concatenation. Chronological ordering is always `(changed_at, id)`.
+
+**`STRICT` tables.**
 
 ---
 
 ## CLI
 
-**`--help` é documentação primária.** Cada subcomando tem `--help` suficiente para uso sem consulta externa, com exemplos concretos.
+**`--help` is the primary documentation.** Each subcommand has a `--help` sufficient for use without outside consultation, with concrete examples.
 
-**Exit codes são contratuais.** O conjunto do SPEC §10 é estável. Adicionar significa pensar duas vezes e atualizar o doc.
+**Exit codes are contractual.** The set of SPEC §10 is stable. Adding one means thinking twice and updating the doc.
 
-**Falhar fechado onde a ambiguidade produz número errado.** Comparação numérica contra coluna sem tipo declarado é erro, não aviso.
+**Fail closed where ambiguity produces a wrong number.** A numeric comparison against a column without a declared type is an error, not a warning.
 
-**Flags em kebab-case, longo descritivo.** Atalhos de letra única só para as realmente frequentes.
-
----
-
-## Testes
-
-**Integração do binário completo.** Rodar o binário em subprocesso e verificar banco, stdout, stderr e exit code. Unit tests só para lógica isolada complexa: parsing de valor, coerção por afinidade, construção de `record_key`.
-
-**SQLite em tmpdir do teste**, nunca fora dele. Sem testes que toquem a rede.
-
-**Sentinela de vazamento.** Valor único e improvável como caminho e como valor de campo, com grep em todo output produzido, incluindo `argv_shape` e o banco.
-
-**Teste escrito junto com o código.** `-race -count=2` obrigatório.
+**Flags in kebab-case, descriptive long form.** Single-letter shortcuts only for the really frequent ones.
 
 ---
 
-## Documentação
+## Tests
 
-**GoDoc em `internal/db/`.** Mesmo sendo `internal`, mantenedores precisam entender a interface `Backend` que sustenta a portabilidade. É o único lugar onde texto explicativo é permitido no código.
+**Integration of the complete binary.** Run the binary in a subprocess and check database, stdout, stderr and exit code. Unit tests only for complex isolated logic: value parsing, affinity coercion, construction of `record_key`.
 
-**Decisão muda código e doc no mesmo commit.** SPEC e implementação não desincronizam.
+**SQLite in the test's tmpdir**, never outside it. No tests that touch the network.
 
-**Onde cada coisa mora:** por quê em `DESIGN.md`, o quê em `SPEC.md`, o comum com o Colligo em `CONTRACT.md`, o que já existe fora em `RELATED.md`, o que vem depois em `ROADMAP.md`, o que foi adiado em `BACKLOG.md`.
+**Leak sentinel.** A unique, improbable value as a path and as a field value, with grep over all output produced, including `argv_shape` and the database.
+
+**A test written together with the code.** `-race -count=2` mandatory.
+
+---
+
+## Documentation
+
+**GoDoc in `internal/db/`.** Even though it is `internal`, maintainers need to understand the `Backend` interface that sustains portability. It is the only place where explanatory text is allowed in the code.
+
+**A decision changes code and doc in the same commit.** SPEC and implementation do not drift apart.
+
+**Where each thing lives:** the why in `DESIGN.md`, the what in `SPEC.md`, what is shared with Colligo in `CONTRACT.md`, what already exists outside in `RELATED.md`, what comes next in `ROADMAP.md`, what was postponed in `BACKLOG.md`.
 
 ---
 
 ## Git
 
-**`CLAUDE.md` é privado** (`.gitignore`). Não vai para o repositório.
+**`CLAUDE.md` is private** (`.gitignore`). It does not go into the repository.
 
-**`.gitignore` obrigatório:** `*.db`, `*.db-wal`, `*.db-shm`, `*.local.toml`.
+**Mandatory `.gitignore`:** `*.db`, `*.db-wal`, `*.db-shm`, `*.local.toml`.
 
-**Commits pequenos, por fatia ou sub-fatia.** Mensagem descreve o que mudou e por quê em uma linha.
+**Small commits, by slice or sub-slice.** The message describes what changed and why in one line.

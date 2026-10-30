@@ -1,98 +1,98 @@
 # Scribo — Roadmap
 
-> **Estado atual: Fatia 0 — decisão pendente.** Nada deve ser construído antes dela.
+> **Current state: Slice 0 — decision pending.** Nothing should be built before it.
 
-A regra deste documento: fatia fina de ponta a ponta antes de largura. O código existente em `internal/` é um esqueleto anterior a esta SPEC e é reescrito na Fatia 1, não remendado.
-
----
-
-## Fatia 0 — Decidir se o Scribo precisa existir, e em que forma
-
-Não é código.
-
-**Pergunta 1, reformulada.** Não "o sqlite-history cobre histórico?" — cobre. A pergunta é: **alguma ferramenta liga cada resultado às entradas verificadas e o invalida quando elas mudam?** Testar sqlite-history, Dolt e o data lineage do Nextflow num estudo real por dois ou três dias, tentando responder "quais resultados ficam inválidos se este FASTQ for substituído?".
-
-**Pergunta 2.** Um módulo com dois binários ou um binário só (`DESIGN.md` §5).
-
-Critério de pronto: duas frases no `DESIGN.md` — o que faltou nas ferramentas existentes, e a forma escolhida. Se nada faltou, o projeto encerra aqui.
+The rule of this document: a thin slice end to end before breadth. The existing code in `internal/` is a skeleton that predates this SPEC and is rewritten in Slice 1, not patched.
 
 ---
 
-## Fatia 1 — Vertical: upsert, histórico, `--at`
+## Slice 0 — Decide whether Scribo needs to exist, and in what form
 
-O coração, reescrito conforme a SPEC.
+It is not code.
 
-Escopo:
+**Question 1, reformulated.** Not "does sqlite-history cover history?" — it does. The question is: **does any tool link each result to the verified inputs and invalidate it when they change?** Test sqlite-history, Dolt and Nextflow's data lineage on a real study for two or three days, trying to answer "which results become invalid if this FASTQ is replaced?".
 
-- `db.Backend` e `Tx` da SPEC §2: `Tx` sem embutir `Backend`; `SelectRow` e `ProjectedRow` só em `Tx`; sem `Insert`, `Update`, `Delete`.
-- Abertura do `CONTRACT.md` §2: detecção de filesystem, PRAGMAs no DSN com `_txlock=immediate`, leitura de volta, conferência do contrato.
-- `tool_runs` com o DDL do contrato; `run_id` no histórico; nada de `command`.
-- `{table}_history` da SPEC §4: `STRICT`, `old_is_null`/`new_is_null`, timestamps RFC 3339.
-- `record_key` como array JSON canônico.
-- `--null FIELD`; `FIELD=null` como texto.
-- Fluxo da SPEC §5 com leitura dentro da transação.
-- Reconciliação e `log --at`.
-- Erros tipados e exit codes.
+**Question 2.** One module with two binaries or a single binary (`DESIGN.md` §5).
 
-Critério de pronto:
-
-- Upsert de 3 campos gera 3 linhas de histórico; o segundo, mudando 1 campo, gera 1.
-- 8 processos escrevendo o mesmo registro: todo `old_value` do histórico confere com a sequência real. `-race` limpo.
-- `record_key` de valores com `,` e `=` não colide.
-- Escrita por fora com `sqlite3` gera `reconciled`, e `--at` avisa.
-- Banco em filesystem de rede simulado abre em `DELETE` com aviso.
-- `tool_runs` criada pelo Colligo é aceita; `tool_runs` com schema divergente → `contract_mismatch`.
+Definition of done: two sentences in `DESIGN.md` — what the existing tools lacked, and the chosen form. If nothing was lacking, the project ends here.
 
 ---
 
-## Fatia 2 — Leitura e porta de entrada
+## Slice 1 — Vertical: upsert, history, `--at`
 
-Escopo: `query` e `export` com `--where` e recusa de comparação sem tipo; formatos TSV, JSONL e CSV; `schema --from` e `--from-multiqc`; `ingest multiqc`.
+The heart, rewritten per the SPEC.
 
-Critério: um `multiqc_data.json` real do nf-core/rnaseq vira tabela por `schema --from-multiqc | sqlite3` e é importado por `ingest multiqc` numa transação; `query` devolve as métricas; `--where "campo>90"` contra coluna sem tipo falha com mensagem clara.
+Scope:
 
----
+- `db.Backend` and `Tx` of SPEC §2: `Tx` without embedding `Backend`; `SelectRow` and `ProjectedRow` only on `Tx`; no `Insert`, `Update`, `Delete`.
+- Opening per `CONTRACT.md` §2: filesystem detection, PRAGMAs in the DSN with `_txlock=immediate`, read-back, contract check.
+- `tool_runs` with the contract's DDL; `run_id` in the history; no `command`.
+- `{table}_history` of SPEC §4: `STRICT`, `old_is_null`/`new_is_null`, RFC 3339 timestamps.
+- `record_key` as a canonical JSON array.
+- `--null FIELD`; `FIELD=null` as text.
+- Flow of SPEC §5 with the read inside the transaction.
+- Reconciliation and `log --at`.
+- Typed errors and exit codes.
 
-## Fatia 3 — Integração com o Colligo
+Definition of done:
 
-A tese do projeto. Exige o Colligo na Fatia 3 dele (store com `samples`, `files`, `facts`).
-
-Escopo: `--sample` resolvido contra `samples`; `--input` gravando `result_inputs` com raiz do Colligo ou calculada; `scribo.rules.toml` e invariantes entrada × resultado; sinal `suspect` em violação; `stale` com grafo e `--samplesheet`; `query --with-staleness`.
-
-Critério:
-
-- `Mapped_Reads` maior que os reads do FASTQ é recusado com exit 3 e sinal gravado.
-- Marcar um FASTQ como `superseded` no Colligo torna obsoletos exatamente os resultados que dependem dele, inclusive por cadeia entre resultados.
-- `stale --samplesheet` gera samplesheet nf-core só com as amostras afetadas, e o nf-core/rnaseq a aceita.
-
----
-
-## Fatia 4 — Olhar para os resultados
-
-Escopo: `diff` com tolerância e causa; `outliers` com z-score robusto e `--signal`; `ingest somalier` e `ingest ngscheckmate`; `export-signals`.
-
-Critério:
-
-- Fixture com três mudanças — por entrada, por versão, sem causa — atribuídas corretamente; a sem causa sai com exit 3.
-- Amostra plantada com taxa de alinhamento de 5% entre amostras a 90% vira sinal `suspect`, e o `colligo status` do mesmo banco a mostra como suspeita.
-- Par de amostras trocado num `somalier.pairs.tsv` gera `identity_mismatch` nas duas.
+- Upsert of 3 fields generates 3 history rows; the second, changing 1 field, generates 1.
+- 8 processes writing the same record: every `old_value` of the history matches the real sequence. `-race` clean.
+- `record_key` of values with `,` and `=` does not collide.
+- A write from outside with `sqlite3` generates `reconciled`, and `--at` warns.
+- A database on a simulated network filesystem opens in `DELETE` with a warning.
+- A `tool_runs` created by Colligo is accepted; a `tool_runs` with a divergent schema → `contract_mismatch`.
 
 ---
 
-## Fatia 5 — Batch, restrito e polimento
+## Slice 2 — Reading and entry door
 
-Escopo: `--batch` com atomicidade total, stdin, colunas `_sample` e `_input`, `--empty-as-null`, `--progress`; regime de banco restrito; `--help` exaustivo com exemplos; README com pipeline real Colligo → nf-core → Scribo; GoReleaser Linux e macOS em amd64 e arm64; CI com `-race`, `vet`, lint e comparação do `CONTRACT.md` com a cópia do Colligo.
+Scope: `query` and `export` with `--where` and refusal of untyped comparison; TSV, JSONL and CSV formats; `schema --from` and `--from-multiqc`; `ingest multiqc`.
 
-Critério: batch de 1000 linhas com erro na linha 500 deixa o banco idêntico; `--debug` recusado em banco restrito.
+Criterion: a real `multiqc_data.json` from nf-core/rnaseq becomes a table by `schema --from-multiqc | sqlite3` and is imported by `ingest multiqc` in one transaction; `query` returns the metrics; `--where "field>90"` against a column without a type fails with a clear message.
 
 ---
 
-## Marcos de versão
+## Slice 3 — Integration with Colligo
+
+The thesis of the project. It requires Colligo at its Slice 3 (store with `samples`, `files`, `facts`).
+
+Scope: `--sample` resolved against `samples`; `--input` storing `result_inputs` with Colligo's root or a computed one; `scribo.rules.toml` and input × result invariants; `suspect` signal on violation; `stale` with graph and `--samplesheet`; `query --with-staleness`.
+
+Criterion:
+
+- `Mapped_Reads` greater than the FASTQ's reads is refused with exit 3 and a signal stored.
+- Marking a FASTQ as `superseded` in Colligo makes stale exactly the results that depend on it, including by chain between results.
+- `stale --samplesheet` generates an nf-core samplesheet with only the affected samples, and nf-core/rnaseq accepts it.
+
+---
+
+## Slice 4 — Looking at the results
+
+Scope: `diff` with tolerance and cause; `outliers` with robust z-score and `--signal`; `ingest somalier` and `ingest ngscheckmate`; `export-signals`.
+
+Criterion:
+
+- A fixture with three changes — by input, by version, with no cause — correctly attributed; the one with no cause exits with 3.
+- A planted sample with an alignment rate of 5% among samples at 90% becomes a `suspect` signal, and the `colligo status` of the same database shows it as suspect.
+- A pair of samples swapped in a `somalier.pairs.tsv` generates `identity_mismatch` in both.
+
+---
+
+## Slice 5 — Batch, restricted and polish
+
+Scope: `--batch` with total atomicity, stdin, `_sample` and `_input` columns, `--empty-as-null`, `--progress`; restricted-database regime; exhaustive `--help` with examples; README with a real Colligo → nf-core → Scribo pipeline; GoReleaser Linux and macOS on amd64 and arm64; CI with `-race`, `vet`, lint and comparison of `CONTRACT.md` with Colligo's copy.
+
+Criterion: a batch of 1000 lines with an error on line 500 leaves the database identical; `--debug` refused on a restricted database.
+
+---
+
+## Version milestones
 
 ```
-v0.x.x   interface CLI em desenvolvimento, pode mudar
-v1.0.0   interface CLI congelada, semver estrito; CONTRACT.md versão estável
-v1.x     Postgres como segunda implementação, eventualmente
+v0.x.x   CLI interface under development, may change
+v1.0.0   CLI interface frozen, strict semver; CONTRACT.md stable version
+v1.x     Postgres as a second implementation, eventually
 ```
 
-Permanece em v0 até a interface estar exercitada em pipeline real, junto com o Colligo.
+It stays at v0 until the interface is exercised in a real pipeline, together with Colligo.

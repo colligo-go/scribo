@@ -1,15 +1,15 @@
-# Scribo — Especificação Técnica
+# Scribo — Technical Specification
 
-Documento declarativo. Para o porquê, ver `DESIGN.md`. Para tudo que é comum com o Colligo — abertura do banco, `tool_runs`, `result_inputs`, `input_signals`, invariantes e grafo de dependências —, `CONTRACT.md`, que prevalece sobre este documento em caso de conflito. Implemente a partir daqui.
+Declarative document. For the why, see `DESIGN.md`. For everything that is shared with Colligo — database opening, `tool_runs`, `result_inputs`, `input_signals`, invariants and dependency graph —, `CONTRACT.md`, which prevails over this document in case of conflict. Implement from here.
 
-Módulo: `github.com/<org>/scribo`
-Go: estável mais recente.
-Driver SQLite: `modernc.org/sqlite`.
+Module: `github.com/<org>/scribo`
+Go: latest stable.
+SQLite driver: `modernc.org/sqlite`.
 CLI: `github.com/spf13/cobra`.
 
 ---
 
-## 1. Estrutura de pacotes
+## 1. Package structure
 
 ```
 scribo/
@@ -64,13 +64,13 @@ scribo/
 └── testdata/
 ```
 
-Tudo em `internal/`. Quando o núcleo comum com o Colligo existir (`DESIGN.md` §5), `db/sqlite/open.go`, `db/sqlite/fsdetect.go`, `contract/` e o cálculo de raiz de `provenance/` passam a importar dele.
+Everything in `internal/`. When the common core with Colligo exists (`DESIGN.md` §5), `db/sqlite/open.go`, `db/sqlite/fsdetect.go`, `contract/` and the root computation of `provenance/` come to import from it.
 
 ---
 
-## 2. Interface `db.Backend`
+## 2. The `db.Backend` interface
 
-Toda persistência passa por aqui. SQL nunca vive nos handlers.
+All persistence goes through here. SQL never lives in the handlers.
 
 ```go
 type Backend interface {
@@ -111,11 +111,11 @@ type Tx interface {
 }
 ```
 
-`Tx` não embute `Backend`: transação aninhada não existe em SQLite, e a interface estreita torna isso impossível de escrever. As leituras que alimentam o histórico — `SelectRow` e `ProjectedRow` — existem **só** em `Tx`, para que seja impossível lê-las fora da transação que escreve.
+`Tx` does not embed `Backend`: a nested transaction does not exist in SQLite, and the narrow interface makes that impossible to write. The reads that feed the history — `SelectRow` and `ProjectedRow` — exist **only** on `Tx`, so that it is impossible to read them outside the transaction that writes.
 
-`BeginTx` abre `BEGIN IMMEDIATE` (`_txlock=immediate` no DSN).
+`BeginTx` opens `BEGIN IMMEDIATE` (`_txlock=immediate` in the DSN).
 
-Tipos auxiliares:
+Auxiliary types:
 
 ```go
 type WriteMode int
@@ -225,20 +225,20 @@ type Rows []Row
 
 ---
 
-## 3. Abertura
+## 3. Opening
 
-Conforme `CONTRACT.md` §2: detecção de filesystem, PRAGMAs no DSN com `_txlock=immediate`, leitura de volta em cada conexão, conferência das tabelas do contrato. `SetMaxOpenConns(1)` para o processo de escrita.
+Per `CONTRACT.md` §2: filesystem detection, PRAGMAs in the DSN with `_txlock=immediate`, read-back on each connection, check of the contract tables. `SetMaxOpenConns(1)` for the writing process.
 
-Depois:
+Then:
 
-1. Ler `study_meta` se existir. Classificação `restricted` liga o regime de §11.
-2. `ColligoPresent`: existem `samples`, `files` e `facts` com o schema do contrato. Resultado cacheado por processo; funcionalidades dependentes do Colligo consultam este valor e reportam indisponibilidade em vez de falhar em silêncio.
+1. Read `study_meta` if it exists. A `restricted` classification turns on the regime of §11.
+2. `ColligoPresent`: `samples`, `files` and `facts` exist with the contract's schema. Result cached per process; features that depend on Colligo consult this value and report unavailability instead of failing silently.
 
 ---
 
-## 4. Tabelas que o Scribo cria
+## 4. Tables that Scribo creates
 
-As do contrato de que é dono — `result_inputs`, `input_signals` — e a sua parte de `tool_runs`, todas com DDL de `CONTRACT.md` §3. Mais uma por tabela de dados:
+Those of the contract that it owns — `result_inputs`, `input_signals` — and its part of `tool_runs`, all with the DDL of `CONTRACT.md` §3. Plus one per data table:
 
 ```sql
 CREATE TABLE IF NOT EXISTS {table}_history (
@@ -259,68 +259,68 @@ CREATE INDEX IF NOT EXISTS idx_{table}_history_field  ON {table}_history(field, 
 CREATE INDEX IF NOT EXISTS idx_{table}_history_run    ON {table}_history(run_id);
 ```
 
-A tabela de dados nunca é criada nem alterada.
+The data table is never created nor altered.
 
-`old_is_null` e `new_is_null` separam NULL de texto vazio sem depender de valor mágico.
+`old_is_null` and `new_is_null` separate NULL from empty text without depending on a magic value.
 
 ### `record_key`
 
-Array JSON de pares `[nome, valor]` ordenados pelo nome do campo, sem espaços, valor NULL como `null` JSON:
+A JSON array of `[name, value]` pairs ordered by field name, without spaces, a NULL value as JSON `null`:
 
 ```
 [["accession","ENCFF001"],["replicate","1"]]
 ```
 
-Injetivo por construção: registros diferentes nunca produzem a mesma chave.
+Injective by construction: different records never produce the same key.
 
 ---
 
-## 5. Fluxo de uma escrita
+## 5. Flow of a write
 
-Validação fora da transação. Estado e escrita dentro.
+Validation outside the transaction. State and write inside.
 
 ```
-1.  validar flags                                    erro → exit 1
-2.  abrir Backend (§3)                               erro → exit 5
-3.  TableExists                                      falso → exit 2, table_not_found
-4.  Columns; validar que todo campo existe           falta → exit 2, column_not_found, sugestão por distância de edição
-5.  coagir valores conforme afinidade                falha → exit 3, invalid_value
-6.  resolver --sample, se houver                     falha → exit 3, unknown_sample
-7.  resolver --input em raízes                       falha → exit 4, input_not_found
-8.  carregar scribo.rules.toml, se houver            falha → exit 4, invalid_rules
-9.  EnsureContractTables, EnsureHistoryTable         uma vez por processo, com cache
-10. BeginRun                                         devolve run_id
+1.  validate flags                                   error → exit 1
+2.  open Backend (§3)                                error → exit 5
+3.  TableExists                                      false → exit 2, table_not_found
+4.  Columns; validate that every field exists        missing → exit 2, column_not_found, suggestion by edit distance
+5.  coerce values according to affinity              failure → exit 3, invalid_value
+6.  resolve --sample, if any                         failure → exit 3, unknown_sample
+7.  resolve --input into roots                       failure → exit 4, input_not_found
+8.  load scribo.rules.toml, if any                   failure → exit 4, invalid_rules
+9.  EnsureContractTables, EnsureHistoryTable         once per process, cached
+10. BeginRun                                         returns run_id
 11. BeginTx                                          BEGIN IMMEDIATE
-12. SelectRow e ProjectedRow                         estado atual e projetado, dentro da transação
-13. reconciliar divergência                          FieldChange com source=reconciled
-14. avaliar regras (§8) sobre o estado resultante    violação → exit 3, invariant_violated
-15. Upsert                                           FieldChange dos campos que mudaram
-16. AppendHistory, AppendInputs                      mesmo run_id
+12. SelectRow and ProjectedRow                       current and projected state, inside the transaction
+13. reconcile divergence                             FieldChange with source=reconciled
+14. evaluate rules (§8) over the resulting state     violation → exit 3, invariant_violated
+15. Upsert                                           FieldChange of the fields that changed
+16. AppendHistory, AppendInputs                      same run_id
 17. Commit
-18. EndRun                                           ended_at e exit_code
+18. EndRun                                           ended_at and exit_code
 ```
 
-Erro a partir de 11 → Rollback, mensagem no stderr, exit code apropriado, `EndRun` com o código.
+Error from 11 on → Rollback, message on stderr, appropriate exit code, `EndRun` with the code.
 
-`--batch` itera as linhas dentro da mesma transação. Erro em qualquer linha → ROLLBACK total, mensagem nomeando a linha.
+`--batch` iterates the lines inside the same transaction. An error on any line → total ROLLBACK, message naming the line.
 
-`--dry-run` executa até 14 dentro de uma transação que termina em Rollback e imprime os `FieldChange` e as regras avaliadas.
-
----
-
-## 6. Reconciliação de lacuna
-
-`ProjectedRow` reconstrói o estado que o histórico afirma. Comparado com `SelectRow`, dentro da transação:
-
-- Campo igual → nada.
-- Campo divergente → linha `source='reconciled'` com `old_value` do projetado e `new_value` do atual, `changed_at` da detecção. Aviso no stderr.
-- Campo sem histórico algum → registro anterior à adoção do Scribo. Ignorado.
-
-`log --at` que atravessa `reconciled` avisa que o estado antes daquele ponto é aproximado. Histórico nunca é apagado nem reescrito.
+`--dry-run` executes up to 14 inside a transaction that ends in Rollback and prints the `FieldChange` and the rules evaluated.
 
 ---
 
-## 7. Valores e afinidade
+## 6. Gap reconciliation
+
+`ProjectedRow` reconstructs the state that the history asserts. Compared with `SelectRow`, inside the transaction:
+
+- Equal field → nothing.
+- Divergent field → a `source='reconciled'` row with `old_value` from the projected and `new_value` from the current, `changed_at` of the detection. Warning on stderr.
+- Field with no history at all → a record prior to Scribo's adoption. Ignored.
+
+A `log --at` that crosses `reconciled` warns that the state before that point is approximate. History is never deleted nor rewritten.
+
+---
+
+## 7. Values and affinity
 
 ```
 FIELD=           Value{Raw: "",     IsNull: false}
@@ -330,17 +330,17 @@ FIELD=94.3       Value{Raw: "94.3", IsNull: false}
 --null FIELD     Value{IsNull: true}
 ```
 
-Não existe valor mágico: `null` digitado é texto. NULL real só por `--null`, que pode ser repetido. Nos formatos de `--batch`: TSV e CSV usam célula vazia com `--empty-as-null` explícito, e JSON usa `null` nativo.
+There is no magic value: a typed `null` is text. A real NULL only through `--null`, which can be repeated. In the `--batch` formats: TSV and CSV use an empty cell with an explicit `--empty-as-null`, and JSON uses native `null`.
 
-**Coerção na escrita.** Coluna `INTEGER`, `REAL` ou `NUMERIC` e valor que parseia como número → vinculado como número. Valor não numérico → `invalid_value`, exit 3.
+**Coercion on write.** A column `INTEGER`, `REAL` or `NUMERIC` and a value that parses as a number → bound as a number. A non-numeric value → `invalid_value`, exit 3.
 
-**Comparação.** `>`, `<`, `>=`, `<=` contra coluna com `Declared=false` ou afinidade textual → `untyped_comparison`, exit 2, sugerindo `--force-text`.
+**Comparison.** `>`, `<`, `>=`, `<=` against a column with `Declared=false` or textual affinity → `untyped_comparison`, exit 2, suggesting `--force-text`.
 
 ---
 
-## 8. Regras: invariantes entrada × resultado
+## 8. Rules: input × result invariants
 
-Arquivo `scribo.rules.toml`, procurado ao lado do banco ou passado por `--rules`. Hash canônico gravado em `tool_runs.config_hash`.
+File `scribo.rules.toml`, looked up next to the database or passed by `--rules`. Canonical hash stored in `tool_runs.config_hash`.
 
 ```toml
 [[rule]]
@@ -356,32 +356,32 @@ table = "rnaseq_qc"
 check = "Alignment_Rate in [0, 100]"
 ```
 
-Vocabulário conforme `CONTRACT.md` §5. Avaliação sobre o estado do registro **depois** da escrita pretendida, dentro da transação.
+Vocabulary per `CONTRACT.md` §5. Evaluation over the record's state **after** the intended write, inside the transaction.
 
-- Regra satisfeita → nada.
-- Regra violada → Rollback, `invariant_violated`, exit 3, mensagem com os dois números e as entradas envolvidas.
-- Regra `input.*` sem entrada sob custódia do Colligo → não avaliada; aviso `rule_unavailable` no stderr, nunca tratada como aprovada. `--require-rules` transforma o aviso em erro.
+- Rule satisfied → nothing.
+- Rule violated → Rollback, `invariant_violated`, exit 3, message with the two numbers and the inputs involved.
+- An `input.*` rule without an input under Colligo's custody → not evaluated; `rule_unavailable` warning on stderr, never treated as passed. `--require-rules` turns the warning into an error.
 
-Toda violação também gera sinal `suspect` em `input_signals`, com `source = invariant:<regra>`, gravado numa transação própria depois do Rollback — a escrita do resultado não acontece, mas o fato de a entrada ter produzido um resultado impossível fica registrado.
+Every violation also generates a `suspect` signal in `input_signals`, with `source = invariant:<rule>`, stored in a transaction of its own after the Rollback — the write of the result does not happen, but the fact that the input produced an impossible result is recorded.
 
 ---
 
-## 9. Proveniência e obsolescência
+## 9. Provenance and staleness
 
-### Declaração
+### Declaration
 
-`--input PATH` repetível. Cada caminho vira aresta `input_kind='file'` em `result_inputs`:
+`--input PATH`, repeatable. Each path becomes an `input_kind='file'` edge in `result_inputs`:
 
-1. `FileRoot(path)`: se o arquivo está em `files` do Colligo e o `stat` bate com o baseline de verificação, usa `blake3_root` de lá.
-2. Senão, calcula a raiz com o extrator de fatos numa leitura única, e avisa que a entrada não está sob custódia.
+1. `FileRoot(path)`: if the file is in Colligo's `files` and the `stat` matches the verification baseline, it uses the `blake3_root` from there.
+2. Otherwise, it computes the root with the fact extractor in a single read, and warns that the input is not under custody.
 
-`--input-result TABLE:KEY` cria aresta `input_kind='result'`, para cadeias entre resultados.
+`--input-result TABLE:KEY` creates an `input_kind='result'` edge, for chains between results.
 
-`--input-field FIELD` restringe as arestas seguintes a um campo; sem ele, o registro inteiro depende da entrada.
+`--input-field FIELD` restricts the following edges to one field; without it, the whole record depends on the input.
 
-### Grafo
+### Graph
 
-Nós e arestas conforme `CONTRACT.md` §6. `provenance/graph.go` monta o grafo em memória a partir de `Edges` e `InvalidatedNodes`, e calcula obsolescência por busca reversa a partir dos nós invalidados: O(V + E) por consulta, sem estado persistido.
+Nodes and edges per `CONTRACT.md` §6. `provenance/graph.go` builds the graph in memory from `Edges` and `InvalidatedNodes`, and computes staleness by reverse search from the invalidated nodes: O(V + E) per query, with no persisted state.
 
 ### `stale`
 
@@ -389,25 +389,25 @@ Nós e arestas conforme `CONTRACT.md` §6. `provenance/graph.go` monta o grafo e
 scribo stale --db DB [--table T] [--format tsv|json] [--samplesheet PATH --template nfcore-rnaseq|nfcore-chipseq|nfcore-atacseq]
 ```
 
-Lista registros obsoletos com o caminho no grafo até o nó invalidado e o motivo. `--samplesheet` escreve a samplesheet nf-core só com as amostras afetadas, a partir dos arquivos de entrada em `files` do Colligo. Sem Colligo presente → `colligo_required`, exit 2.
+Lists stale records with the path in the graph up to the invalidated node and the reason. `--samplesheet` writes the nf-core samplesheet with only the affected samples, from the input files in Colligo's `files`. Without Colligo present → `colligo_required`, exit 2.
 
-Código de saída 0 se nada obsoleto, 3 se há obsoletos.
+Exit code 0 if nothing is stale, 3 if there are stale items.
 
 ---
 
-## 10. Subcomandos
+## 10. Subcommands
 
-### Flags globais
+### Global flags
 
 ```
---db             path do banco                        obrigatório
---table          nome da tabela                       obrigatório onde indicado
---journal-mode   wal|delete                           opcional, default detectado
---busy-timeout   ms                                   opcional, default 5000
---step           rótulo da etapa do pipeline          opcional, gravado em tool_runs
---rules          caminho do scribo.rules.toml         opcional
---quiet          suprime stdout não-essencial
---debug          loga SQL e tempos no stderr          proibido em banco restrito
+--db             path of the database                 mandatory
+--table          name of the table                    mandatory where indicated
+--journal-mode   wal|delete                           optional, default detected
+--busy-timeout   ms                                   optional, default 5000
+--step           label of the pipeline step           optional, stored in tool_runs
+--rules          path of scribo.rules.toml            optional
+--quiet          suppresses non-essential stdout
+--debug          logs SQL and timings on stderr       forbidden on a restricted database
 ```
 
 ### upsert
@@ -417,9 +417,9 @@ scribo upsert --db DB --table T [--key K=V]... [--sample S] [FIELD=VALUE]... [--
 scribo upsert --db DB --table T --batch PATH|- [--format csv|tsv|json] [--empty-as-null]
 ```
 
-`--sample S` resolve pela tabela `samples` do Colligo e acrescenta a chave `sample=<id>`. `--insert-only`, `--update-only`, `--dry-run`, `--progress`.
+`--sample S` resolves through Colligo's `samples` table and adds the key `sample=<id>`. `--insert-only`, `--update-only`, `--dry-run`, `--progress`.
 
-No `--batch`, colunas especiais `_sample` e `_input` (lista separada por `;`) fazem o papel das flags por linha.
+In `--batch`, the special columns `_sample` and `_input` (a `;`-separated list) play the role of the flags per line.
 
 ### log
 
@@ -434,16 +434,16 @@ scribo query  --db DB --table T [--where COND]... [--fields F1,F2] [--format tsv
 scribo export --db DB --table T [--where COND]... [--out PATH] [--format tsv|json|csv] [--with-staleness]
 ```
 
-`--with-staleness` acrescenta a coluna `_stale` calculada pelo grafo.
+`--with-staleness` adds the `_stale` column computed from the graph.
 
 ### schema
 
 ```
-scribo schema --from arquivo.tsv --table T [--key K]...
+scribo schema --from file.tsv --table T [--key K]...
 scribo schema --from-multiqc multiqc_data.json --table T
 ```
 
-Imprime o `CREATE TABLE`. Não executa.
+Prints the `CREATE TABLE`. It does not execute.
 
 ### ingest
 
@@ -453,9 +453,9 @@ scribo ingest somalier --db DB somalier.pairs.tsv [--relatedness-min 0.8] [--rel
 scribo ingest ngscheckmate --db DB output_all.txt
 ```
 
-`multiqc` lê as métricas gerais por amostra e faz upsert na tabela, uma transação para o arquivo inteiro. `--map-sample colligo` resolve nomes de amostra do MultiQC contra `samples`; nome sem correspondência → `unknown_sample`, nada gravado.
+`multiqc` reads the general per-sample metrics and upserts them into the table, one transaction for the whole file. `--map-sample colligo` resolves MultiQC sample names against `samples`; a name with no match → `unknown_sample`, nothing stored.
 
-`somalier` e `ngscheckmate` comparam o parentesco observado com o declarado: mesma amostra ou réplica técnica declarada e parentesco abaixo de `--relatedness-min` → `identity_mismatch`; amostras declaradas distintas acima do limite → `identity_mismatch` nas duas; declarado e observado coerentes → `identity_confirmed`. Sinais gravados em `input_signals` para as raízes das entradas das amostras.
+`somalier` and `ngscheckmate` compare the observed relatedness with the declared: the same sample or technical replicate declared and relatedness below `--relatedness-min` → `identity_mismatch`; samples declared distinct above the limit → `identity_mismatch` in both; declared and observed coherent → `identity_confirmed`. Signals stored in `input_signals` for the roots of the samples' inputs.
 
 ### diff
 
@@ -463,15 +463,15 @@ scribo ingest ngscheckmate --db DB output_all.txt
 scribo diff --db DB --table T --run A --run B [--tolerance F=0.01]... [--format tsv|json]
 ```
 
-Para cada registro e campo com valor nas duas execuções: diferença absoluta e relativa; mudança acima da tolerância é reportada com a causa:
+For each record and field with a value in both runs: absolute and relative difference; a change above the tolerance is reported with the cause:
 
-| Causa | Condição |
-| ----- | -------- |
-| `input` | conjunto de raízes de entrada do registro difere entre A e B |
-| `tool` | `tool_version` ou `step` difere entre os `tool_runs` de A e B |
-| `none` | entradas e ferramenta idênticas |
+| Cause   | Condition                                                           |
+| ------- | ------------------------------------------------------------------- |
+| `input` | the set of the record's input roots differs between A and B         |
+| `tool`  | `tool_version` or `step` differs between the `tool_runs` of A and B |
+| `none`  | identical inputs and tool                                           |
 
-Causa `none` é destacada: é não-determinismo. Código de saída 0 se nada acima da tolerância, 3 se há mudança com causa `none`, 0 com relatório nos demais casos. `--fail-on input,tool,none` escolhe o que falha.
+Cause `none` is highlighted: it is non-determinism. Exit code 0 if nothing above the tolerance, 3 if there is a change with cause `none`, 0 with a report in the other cases. `--fail-on input,tool,none` chooses what fails.
 
 ### outliers
 
@@ -479,9 +479,9 @@ Causa `none` é destacada: é não-determinismo. Código de saída 0 se nada aci
 scribo outliers --db DB --table T --field F [--step S] [--group-by COL] [--z 3.5] [--signal]
 ```
 
-Por campo, dentro de cada grupo: mediana `m`, MAD `d`, e `z = 0.6745 · (x − m) / d`. `|z|` acima do limite é outlier. Grupo com menos de 8 amostras → não avaliado, aviso. `d = 0` → não avaliado, aviso.
+Per field, within each group: median `m`, MAD `d`, and `z = 0.6745 · (x − m) / d`. `|z|` above the limit is an outlier. A group with fewer than 8 samples → not evaluated, warning. `d = 0` → not evaluated, warning.
 
-`--signal` grava `suspect` em `input_signals` para as entradas de cada outlier, com `source = outlier:<campo>` e o `z` em `detail`. Sem `--signal`, só imprime.
+`--signal` stores `suspect` in `input_signals` for the inputs of each outlier, with `source = outlier:<field>` and the `z` in `detail`. Without `--signal`, it only prints.
 
 ### signals
 
@@ -489,69 +489,69 @@ Por campo, dentro de cada grupo: mediana `m`, MAD `d`, e `z = 0.6745 · (x − m
 scribo export-signals --db DB [--since TIMESTAMP] [--format json]
 ```
 
-Exporta sinais, violações de invariante e linhas `reconciled` como casos para o corpus de falhas do Colligo.
+Exports signals, invariant violations and `reconciled` rows as cases for Colligo's failure corpus.
 
 ---
 
-## 11. Banco restrito
+## 11. Restricted database
 
-Com `study_meta` restrito, ou `--restricted`:
+With a restricted `study_meta`, or `--restricted`:
 
-- `--debug` → erro.
-- Permissão `0600` esperada; mais frouxa → erro, `--allow-insecure-permissions` registrado.
-- Caminho em pasta sincronizada → erro, `--allow-synced-path`.
-- `detail` de sinais e mensagens de erro usam identificadores opacos do Colligo, nunca nome real.
-- `export-signals` recusa sem `--allow-restricted-export`.
+- `--debug` → error.
+- Permission `0600` expected; looser → error, `--allow-insecure-permissions` recorded.
+- Path in a synced folder → error, `--allow-synced-path`.
+- `detail` of signals and error messages use Colligo's opaque identifiers, never the real name.
+- `export-signals` refuses without `--allow-restricted-export`.
 
 ---
 
 ## 12. Exit codes
 
 ```
-0   sucesso
-1   erro de uso
-2   erro de banco        tabela ou coluna inexistente, comparação sem tipo, contrato divergente, Colligo necessário
-3   erro de dado         valor inválido, amostra desconhecida, invariante violada, resultados obsoletos, diff sem causa
-4   erro de arquivo      batch, regras ou entrada não encontrados; formato inválido
-5   erro de sistema      disco, permissão, I/O, PRAGMA sem efeito
+0   success
+1   usage error
+2   database error       nonexistent table or column, untyped comparison, contract divergence, Colligo required
+3   data error           invalid value, unknown sample, violated invariant, stale results, diff without cause
+4   file error           batch, rules or input not found; invalid format
+5   system error         disk, permission, I/O, PRAGMA without effect
 ```
 
-Mensagens no stderr:
+Messages on stderr:
 
 ```
-ERROR [<código_tipado>]: <mensagem principal>
-→ <contexto, linha do erro, sugestão>
+ERROR [<typed_code>]: <main message>
+→ <context, line of the error, suggestion>
 ```
 
-Códigos tipados: `table_not_found`, `column_not_found`, `key_not_found`, `key_already_exists`, `invalid_value`, `untyped_comparison`, `unknown_sample`, `input_not_found`, `invalid_rules`, `invariant_violated`, `rule_unavailable`, `colligo_required`, `contract_mismatch`, `stale_results`, `nondeterministic_change`, `file_not_found`, `invalid_format`, `batch_failed`, `db_busy`, `permission_denied`, `synced_path`, `pragma_ineffective`, `usage`.
+Typed codes: `table_not_found`, `column_not_found`, `key_not_found`, `key_already_exists`, `invalid_value`, `untyped_comparison`, `unknown_sample`, `input_not_found`, `invalid_rules`, `invariant_violated`, `rule_unavailable`, `colligo_required`, `contract_mismatch`, `stale_results`, `nondeterministic_change`, `file_not_found`, `invalid_format`, `batch_failed`, `db_busy`, `permission_denied`, `synced_path`, `pragma_ineffective`, `usage`.
 
 ---
 
-## 13. Concorrência
+## 13. Concurrency
 
-Escritas serializam. `BEGIN IMMEDIATE` pega o lock de escrita na entrada da transação; `busy_timeout` controla a espera. Sob alta contenção, spool: cada job escreve arquivo local, um `upsert --batch` consolida. Em filesystem de rede, DELETE no lugar de WAL e spool vira requisito prático.
+Writes serialise. `BEGIN IMMEDIATE` takes the write lock at the entry of the transaction; `busy_timeout` controls the wait. Under high contention, spool: each job writes a local file, one `upsert --batch` consolidates. On a network filesystem, DELETE in place of WAL and spool becomes a practical requirement.
 
 ---
 
-## 14. Testes
+## 14. Tests
 
-Integração do binário completo em subprocesso, SQLite em tmpdir.
+Integration of the complete binary in a subprocess, SQLite in tmpdir.
 
-Obrigatórios:
+Mandatory:
 
-- atomicidade unitária e batch: erro no meio não persiste nada; banco byte-idêntico antes e depois
-- concorrência: N processos escrevendo o mesmo registro; todo `old_value` do histórico igual ao valor imediatamente anterior na ordem `(changed_at, id)`; `-race`
-- histórico e `record_key`: chave independe da ordem das flags; valores com `,`, `=`, `"` e `[` não colidem
-- NULL: `FIELD=null` grava texto; `--null FIELD` grava NULL; histórico distingue os dois
-- reconciliação: escrita por fora com `sqlite3` gera `reconciled`; `--at` avisa
-- afinidade e comparação sem tipo
-- detecção de filesystem por tipo simulado
-- contrato: `tool_runs` com schema divergente → `contract_mismatch` sem escrita
-- regras: `Mapped_Reads > input.reads` recusado com exit 3 e sinal `suspect` gravado; regra `input.*` sem Colligo → `rule_unavailable`
-- obsolescência: invalidar um arquivo no fixture do Colligo torna obsoletos exatamente os registros que o alcançam, inclusive por cadeia `result → result`
-- `stale --samplesheet` gera samplesheet válida só com as amostras afetadas
-- `diff`: fixture com mudança por entrada, por ferramenta e sem causa; cada uma atribuída corretamente
-- `outliers`: amostra plantada com `z` alto detectada; grupo pequeno e MAD zero não avaliados
-- `ingest multiqc` de um `multiqc_data.json` real de nf-core/rnaseq; `ingest somalier` com par trocado gera `identity_mismatch`
-- restrito: `--debug` recusado; permissão frouxa recusada; `detail` sem nome real
-- vazamento: sentinela em caminho e valor ausente de `argv_shape`, de `detail` e de todo output
+- unit and batch atomicity: an error in the middle persists nothing; database byte-identical before and after
+- concurrency: N processes writing the same record; every `old_value` of the history equal to the value immediately before in the order `(changed_at, id)`; `-race`
+- history and `record_key`: the key is independent of the order of the flags; values with `,`, `=`, `"` and `[` do not collide
+- NULL: `FIELD=null` stores text; `--null FIELD` stores NULL; the history distinguishes the two
+- reconciliation: a write from outside with `sqlite3` generates `reconciled`; `--at` warns
+- affinity and untyped comparison
+- filesystem detection by simulated type
+- contract: `tool_runs` with a divergent schema → `contract_mismatch` without writing
+- rules: `Mapped_Reads > input.reads` refused with exit 3 and a `suspect` signal stored; an `input.*` rule without Colligo → `rule_unavailable`
+- staleness: invalidating a file in Colligo's fixture makes stale exactly the records that reach it, including by `result → result` chain
+- `stale --samplesheet` generates a valid samplesheet with only the affected samples
+- `diff`: fixture with a change by input, by tool and with no cause; each one attributed correctly
+- `outliers`: a planted sample with a high `z` detected; a small group and zero MAD not evaluated
+- `ingest multiqc` of a real `multiqc_data.json` from nf-core/rnaseq; `ingest somalier` with a swapped pair generates `identity_mismatch`
+- restricted: `--debug` refused; loose permission refused; `detail` without a real name
+- leakage: sentinel in path and value absent from `argv_shape`, from `detail` and from all output
