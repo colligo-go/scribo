@@ -2,7 +2,7 @@
 
 > **Current state: Slice 0 — decision pending.** Nothing should be built before it.
 
-The rule of this document: a thin slice end to end before breadth. The existing code in `internal/` is a skeleton that predates this SPEC and is rewritten in Slice 1, not patched.
+The rule of this document: a thin slice end to end before breadth. There is no code yet: Slice 1 is written from this SPEC.
 
 ---
 
