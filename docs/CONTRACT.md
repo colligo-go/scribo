@@ -110,11 +110,11 @@ CREATE INDEX IF NOT EXISTS idx_input_signals_root ON input_signals(input_root);
 
 ## 4. What each signal means for Colligo
 
-| Signal | Effect on Colligo's custody |
-| ------ | --------------------------- |
-| `suspect` | Derived state `suspect` added to the custody state; `advisory`, listed in `status` with the `source` |
-| `identity_confirmed` | `identity` assertion passed; appears in the certificate |
-| `identity_mismatch` | `identity` assertion failed; `blocking` |
+| Signal               | Effect on Colligo's custody                                                                          |
+| -------------------- | ---------------------------------------------------------------------------------------------------- |
+| `suspect`            | Derived state `suspect` added to the custody state; `advisory`, listed in `status` with the `source` |
+| `identity_confirmed` | `identity` assertion passed; appears in the certificate                                              |
+| `identity_mismatch`  | `identity` assertion failed; `blocking`                                                              |
 
 The original custody state is never overwritten. A signal is one more assertion, with a declared source, in the same logic of declared against observed.
 
@@ -124,12 +124,12 @@ The original custody state is never overwritten. A signal is one more assertion,
 
 Scribo evaluates rules that link a result value to the facts of the inputs. Minimum vocabulary of v1:
 
-| Rule | Meaning |
-| ---- | ------- |
+| Rule               | Meaning                                                        |
+| ------------------ | -------------------------------------------------------------- |
 | `F <= input.reads` | field F does not exceed the total reads of the declared inputs |
-| `F <= input.bases` | the same for bases |
-| `F <= G` | field F does not exceed field G of the same record |
-| `F in [a, b]` | field F in the closed interval |
+| `F <= input.bases` | the same for bases                                             |
+| `F <= G`           | field F does not exceed field G of the same record             |
+| `F in [a, b]`      | field F in the closed interval                                 |
 
 `input.reads` is the sum of `records.reads` of the facts of the record's `file` inputs, read from Colligo's `facts` table. Without an input under custody, `input.*` rules are not evaluated and this is reported, never assumed to have passed.
 

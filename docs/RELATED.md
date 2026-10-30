@@ -14,12 +14,12 @@ Value history in a database is a solved problem. Scribo adds, together with Coll
 
 ## 2. Data history and versioning
 
-| Tool | What it does | What it does not do |
-| ---- | ------------ | ------------------- |
+| Tool           | What it does                                                                                                              | What it does not do                                                                                      |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
 | sqlite-history | Trigger-based history, with `_version`, `_updated` and `_mask` of changed columns; cannot be bypassed by direct `sqlite3` | Provenance, invalidation; reconstruction by date is not a ready-made command; requires Python to install |
-| sqlite-utils | insert, upsert, query, export from CSV/TSV/JSON | History |
-| Dolt | Versioned SQL database with commits; native `AS OF` and `dolt_history_<table>`; Go binary | Not SQLite; does not know verified inputs, invariants nor invalidation by source |
-| DVC | Versions files and metrics per git commit | Per-sample metric with per-field history; verified provenance |
+| sqlite-utils   | insert, upsert, query, export from CSV/TSV/JSON                                                                           | History                                                                                                  |
+| Dolt           | Versioned SQL database with commits; native `AS OF` and `dolt_history_<table>`; Go binary                                 | Not SQLite; does not know verified inputs, invariants nor invalidation by source                         |
+| DVC            | Versions files and metrics per git commit                                                                                 | Per-sample metric with per-field history; verified provenance                                            |
 
 Consequence: Scribo's history is not a differentiator. If Slice 0 shows that sqlite-history or Dolt cover the real use, Scribo's history may even be swapped for one of them.
 
@@ -27,10 +27,10 @@ Consequence: Scribo's history is not a differentiator. If Slice 0 shows that sql
 
 ## 3. Execution provenance
 
-| Tool | What it does | What it does not do |
-| ---- | ------------ | ------------------- |
+| Tool                  | What it does                                                                               | What it does not do                                                                                                            |
+| --------------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
 | Nextflow data lineage | Since 25.04, experimental: path, size and checksum of outputs; `lineage diff` between runs | Does not invalidate when the source changes later; does not store per-sample metrics; does not attribute a cause to the change |
-| Snakemake | Provenance inside the workflow; re-runs what changed | Same limit: everything inside the workflow, nothing about the external source |
+| Snakemake             | Provenance inside the workflow; re-runs what changed                                       | Same limit: everything inside the workflow, nothing about the external source                                                  |
 
 Consequence: Scribo does not compete with the orchestrator. The orchestrator knows what ran; Scribo knows whether what ran is still valid.
 
@@ -38,10 +38,10 @@ Consequence: Scribo does not compete with the orchestrator. The orchestrator kno
 
 ## 4. Per-sample metrics
 
-| Tool | What it does | What it does not do |
-| ---- | ------------ | ------------------- |
-| MultiQC | Aggregates per-sample QC metrics in a report | History between runs, diff, provenance |
-| MLflow, W&B | Registration of ML experiment metrics | Heavy for HPC without a server; no provenance of biological input |
+| Tool        | What it does                                 | What it does not do                                               |
+| ----------- | -------------------------------------------- | ----------------------------------------------------------------- |
+| MultiQC     | Aggregates per-sample QC metrics in a report | History between runs, diff, provenance                            |
+| MLflow, W&B | Registration of ML experiment metrics        | Heavy for HPC without a server; no provenance of biological input |
 
 Consequence: MultiQC is an entry door, not a competitor. `ingest multiqc` turns the report that everybody already has into a queryable history.
 
@@ -49,10 +49,10 @@ Consequence: MultiQC is an entry door, not a competitor. `ingest multiqc` turns 
 
 ## 5. Sample identity
 
-| Tool | What it does | Relationship |
-| ---- | ------------ | ------------ |
-| somalier | Relatedness between samples by genotype at selected sites | `ingest somalier` compares with the declared and returns a signal to Colligo |
-| NGSCheckMate | Sample matching by SNPs | same |
+| Tool         | What it does                                              | Relationship                                                                 |
+| ------------ | --------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| somalier     | Relatedness between samples by genotype at selected sites | `ingest somalier` compares with the declared and returns a signal to Colligo |
+| NGSCheckMate | Sample matching by SNPs                                   | same                                                                         |
 
 Consequence: Scribo does not compute genetic identity. It compares what those tools observed with what the study declared.
 

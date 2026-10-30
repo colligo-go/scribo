@@ -22,13 +22,13 @@ Scribo answers this together with Colligo. Colligo guarantees the inputs before 
 
 ## 2. What already exists, and what is left
 
-| Tool | Does | Does not do |
-| ---- | ---- | ----------- |
-| sqlite-utils | insert, upsert, query, export from CSV/TSV/JSON | history, provenance |
-| sqlite-history | trigger-based history with version, timestamp and mask of changed columns | reconstruction CLI by date; provenance; binary without Python |
-| Dolt | versioned SQL database, native `AS OF` and `dolt_history_<table>`, Go binary | not SQLite; does not know verified inputs nor invalidation |
-| Nextflow data lineage | records path, size and checksum of a workflow's outputs | does not invalidate a result when the source changes later; does not store per-sample metrics |
-| MultiQC | aggregates per-sample QC metrics in a report | history between runs, provenance, invalidation |
+| Tool                  | Does                                                                         | Does not do                                                                                   |
+| --------------------- | ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| sqlite-utils          | insert, upsert, query, export from CSV/TSV/JSON                              | history, provenance                                                                           |
+| sqlite-history        | trigger-based history with version, timestamp and mask of changed columns    | reconstruction CLI by date; provenance; binary without Python                                 |
+| Dolt                  | versioned SQL database, native `AS OF` and `dolt_history_<table>`, Go binary | not SQLite; does not know verified inputs nor invalidation                                    |
+| Nextflow data lineage | records path, size and checksum of a workflow's outputs                      | does not invalidate a result when the source changes later; does not store per-sample metrics |
+| MultiQC               | aggregates per-sample QC metrics in a report                                 | history between runs, provenance, invalidation                                                |
 
 History alone is saturated: a Scribo that only does that has no reason to exist. What is left, and nobody covers, is the combination with Colligo: **provenance per value, invalidation by reachability, input × result invariants and diff with cause.**
 
@@ -179,15 +179,15 @@ Proposal: **option 1**. The final decision is part of Slice 0. Until then, `CONT
 
 ### What Scribo gives Colligo
 
-| Contribution | Mechanism | Colligo item it unlocks |
-| ------------ | --------- | ----------------------- |
-| Signal of a suspect input | `outliers` → `input_signals` | declared × observed organism |
-| Confirmed identity | `ingest somalier` → `input_signals` | propagated sample identity |
-| Reprocessing plan | `stale --samplesheet` | closes the cycle of `recheck --upstream` |
-| End-to-end completeness | expected results in `[results]` | `status` with the complete funnel |
-| Scrub priority | count in `result_inputs` | scrub of what matters most first |
-| Garbage collection with provenance | `result_inputs` as usage history | `gc` that knows what is regenerable |
-| Corpus of real failures | `export-signals` | `FAILURES.md` and benchmark |
+| Contribution                       | Mechanism                           | Colligo item it unlocks                  |
+| ---------------------------------- | ----------------------------------- | ---------------------------------------- |
+| Signal of a suspect input          | `outliers` → `input_signals`        | declared × observed organism             |
+| Confirmed identity                 | `ingest somalier` → `input_signals` | propagated sample identity               |
+| Reprocessing plan                  | `stale --samplesheet`               | closes the cycle of `recheck --upstream` |
+| End-to-end completeness            | expected results in `[results]`     | `status` with the complete funnel        |
+| Scrub priority                     | count in `result_inputs`            | scrub of what matters most first         |
+| Garbage collection with provenance | `result_inputs` as usage history    | `gc` that knows what is regenerable      |
+| Corpus of real failures            | `export-signals`                    | `FAILURES.md` and benchmark              |
 
 ### What Colligo gives Scribo
 

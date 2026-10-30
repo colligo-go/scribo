@@ -465,11 +465,11 @@ scribo diff --db DB --table T --run A --run B [--tolerance F=0.01]... [--format 
 
 For each record and field with a value in both runs: absolute and relative difference; a change above the tolerance is reported with the cause:
 
-| Cause | Condition |
-| ----- | --------- |
-| `input` | the set of the record's input roots differs between A and B |
-| `tool` | `tool_version` or `step` differs between the `tool_runs` of A and B |
-| `none` | identical inputs and tool |
+| Cause   | Condition                                                           |
+| ------- | ------------------------------------------------------------------- |
+| `input` | the set of the record's input roots differs between A and B         |
+| `tool`  | `tool_version` or `step` differs between the `tool_runs` of A and B |
+| `none`  | identical inputs and tool                                           |
 
 Cause `none` is highlighted: it is non-determinism. Exit code 0 if nothing above the tolerance, 3 if there is a change with cause `none`, 0 with a report in the other cases. `--fail-on input,tool,none` chooses what fails.
 
