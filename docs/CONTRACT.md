@@ -131,7 +131,7 @@ Scribo evaluates rules that link a result value to the facts of the inputs. Mini
 | `F <= G`           | field F does not exceed field G of the same record             |
 | `F in [a, b]`      | field F in the closed interval                                 |
 
-`input.reads` is the sum of `records.reads` of the facts of the record's `file` inputs, read from Colligo's `facts` table. Without an input under custody, `input.*` rules are not evaluated and this is reported, never assumed to have passed.
+`input.reads` is the sum of the `records` field of the `records` fact of the of the record's `file` inputs, read from Colligo's `facts` table. Without an input under custody, `input.*` rules are not evaluated and this is reported, never assumed to have passed.
 
 ---
 
@@ -152,5 +152,5 @@ A result is **stale** if any node reachable from it is invalidated: a `stale`, `
 ## 8. Real use feeding both
 
 - **Scrub priority.** Colligo orders the scrub by number of dependent results (count in `result_inputs`), then by `last_verified_at`.
-- **Garbage collection.** Colligo's `gc` uses `result_inputs` to tell an unused file, a regenerable file and an irreplaceable file apart.
-- **Failure corpus.** `reconciled` rows, invariant violations and `suspect` signals are exportable (`scribo export-signals`) as cases for Colligo's `FAILURES.md`.
+- **Garbage collection.** Colligo's `gc` (postponed, see Colligo's `BACKLOG.md`) uses `result_inputs` to tell an unused file, a regenerable file and an irreplaceable file apart.
+- **Failure corpus.** `reconciled` rows, invariant violations and `suspect` signals are exportable (`scribo export-signals`) as cases for Colligo's `FAILURES.md` (planned; the file does not exist yet).
