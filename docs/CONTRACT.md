@@ -131,7 +131,7 @@ Scribo evaluates rules that link a result value to the facts of the inputs. Mini
 | `F <= G`           | field F does not exceed field G of the same record             |
 | `F in [a, b]`      | field F in the closed interval                                 |
 
-`input.reads` is the sum of the `records` field of the `records` fact of the of the record's `file` inputs, read from Colligo's `facts` table. Without an input under custody, `input.*` rules are not evaluated and this is reported, never assumed to have passed.
+`input.reads` is the sum of the `records` field of the `records` fact of the record's `file` inputs, read from Colligo's `facts` table. Without an input under custody, `input.*` rules are not evaluated and this is reported, never assumed to have passed.
 
 ---
 
