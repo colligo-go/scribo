@@ -1,149 +1,149 @@
 # Scribo — Backlog
 
-Features conscientemente adiadas. **Não implementar nada daqui sem pedido explícito.**
+Features that were consciously postponed. **Do not implement anything from here without an explicit request.**
 
-Saíram do backlog: a biblioteca compartilhada com o Colligo virou a decisão de núcleo comum da Fatia 0 (`DESIGN.md` §5) e o `CONTRACT.md`; `--file` para registro único foi coberto por `ingest multiqc` no caso mais comum.
+These left the backlog: the library shared with Colligo became the common-core decision of Slice 0 (`DESIGN.md` §5) and `CONTRACT.md`; `--file` for a single record was covered by `ingest multiqc` in the most common case.
 
-Regra: todo item carrega uma frase de "o que destravaria". Sem ela, o item é capricho; com ela, é decisão adiada com gatilho.
+Rule: every item carries a sentence on "what would unlock it". Without it, the item is a whim; with it, it is a postponed decision with a trigger.
 
 ---
 
-## Comandos cortados da v1
+## Commands cut from v1
 
 ### `status`
 
-Visão geral: total de registros, contagem por valor de `Status`, NULLs por coluna.
+Overview: total records, count per `Status` value, NULLs per column.
 
-Status: é um `query` com agregação. Não justifica comando próprio, e a contagem de NULL por coluna exige varredura completa a cada chamada.
+Status: it is a `query` with aggregation. It does not justify its own command, and counting NULLs per column requires a full scan on every call.
 
-Destrava quando: a repetição do mesmo `query` virar atrito real.
+Unlocks when: repeating the same `query` becomes real friction.
 
 ### `delete`
 
-Remover registro preservando histórico.
+Remove a record while preserving history.
 
-Status: em pipeline raramente se deleta amostra — invalida-se com um campo de status, e o histórico segue íntegro. Deletar por `sqlite3` é possível e a Fatia 1 detecta como lacuna reconciliada.
+Status: in a pipeline a sample is rarely deleted — it is invalidated with a status field, and the history remains intact. Deleting through `sqlite3` is possible and Slice 1 detects it as a reconciled gap.
 
-Destrava quando: aparecer caso real de remoção que precise de histórico correto do ato de remover.
+Unlocks when: a real case of removal appears that needs a correct history of the act of removing.
 
-### `--file` para registro único
+### `--file` for a single record
 
-Ler valores de um arquivo de métricas para um único registro.
+Read values from a metrics file into a single record.
 
-Status: parsing em bash e passagem por `FIELD=VALUE` resolve. O `--batch` cobre o caso de volume.
+Status: parsing in bash and passing through `FIELD=VALUE` solves it. `--batch` covers the volume case.
 
-Destrava quando: a conversão em bash virar frágil o suficiente para justificar um parser na ferramenta.
-
----
-
-## `--clear` no upsert
-
-Limpar campos não mencionados, oposto do default de preservar.
-
-Destrava quando: aparecer caso real de "quero reiniciar este registro mantendo só estes campos". O workaround é mencionar todos os campos.
+Unlocks when: the conversion in bash becomes fragile enough to justify a parser in the tool.
 
 ---
 
-## `--where` com OR, parênteses, LIKE, IN
+## `--clear` on upsert
 
-Filtros complexos. Hoje só AND de operadores básicos.
+Clear fields not mentioned, the opposite of the default of preserving.
 
-Destrava quando: o caso real exigir. Quem precisa hoje usa `sqlite3` — não estamos no caminho de virar substituto de SQL.
+Unlocks when: a real case of "I want to reset this record keeping only these fields" appears. The workaround is to mention all the fields.
+
+---
+
+## `--where` with OR, parentheses, LIKE, IN
+
+Complex filters. Today only AND of basic operators.
+
+Unlocks when: the real case requires it. Whoever needs it today uses `sqlite3` — we are not on the path to becoming a substitute for SQL.
 
 ---
 
 ## `prune --before`
 
-Apagar histórico anterior a uma data, com confirmação.
+Delete history prior to a date, with confirmation.
 
-Destrava quando: uso real mostrar `_history` virando problema de espaço, na casa de milhões de linhas. Comum só em produção contínua.
-
----
-
-## `copy` — copiar registros entre bancos
-
-Mover ou clonar registros entre `.db` diferentes.
-
-Destrava quando: aparecer caso real de fusão ou divisão de banco. O workaround é `ATTACH DATABASE` no `sqlite3`.
+Unlocks when: real use shows `_history` becoming a space problem, in the range of millions of rows. Common only in continuous production.
 
 ---
 
-## `validate` — checar integridade de paths no disco
+## `copy` — copy records between databases
 
-Verificar que os paths gravados ainda existem no filesystem.
+Move or clone records between different `.db` files.
 
-Status: sobrepõe o que o Colligo já faz melhor, com hash e grade de chunks. Um path registrado pelo Scribo que aponta para arquivo sob custódia do Colligo já é verificável por lá.
-
-Destrava quando: existir caso de path gravado pelo Scribo fora de qualquer custódia do Colligo, e a podridão de path virar problema medido.
+Unlocks when: a real case of merging or splitting a database appears. The workaround is `ATTACH DATABASE` in `sqlite3`.
 
 ---
 
-## Preditor de recursos a partir do histórico
+## `validate` — check integrity of paths on disk
 
-"Este job vai estourar a memória que pedi?" A partir do histórico de execuções em `tool_runs`.
+Verify that the stored paths still exist on the filesystem.
 
-Status: o Nextflow já faz retry com escalonamento de memória, o que cobre o caso prático sem prever nada. O valor marginal é saber antes em vez de depois de uma falha.
+Status: it overlaps with what Colligo already does better, with hash and chunk grid. A path registered by Scribo that points to a file under Colligo's custody is already verifiable there.
 
-Destrava quando: você não estiver usando orquestrador com retry, e o custo das falhas por OOM virar mensurável.
-
----
-
-## Store PostgreSQL
-
-Segunda implementação de `db.Backend`.
-
-Status: a abstração existe desde a Fatia 1 exatamente para isto. Diferenças a cobrir: dialeto (`AUTOINCREMENT` contra `SERIAL`, `?` contra `$1`, `ON CONFLICT`, quoting), modelo de tipo (afinidade tolerante do SQLite contra tipagem estrita do Postgres), modelo de concorrência (WAL mais busy_timeout contra MVCC mais statement_timeout), DSN, e testes de integração com container.
-
-Destrava quando: aparecer caso real onde o SQLite não atende — múltiplos processos em hosts diferentes, escala de consórcio, requisito institucional. Não na demanda especulativa.
-
-Nota: em filesystem de rede, o Postgres deixa de ser luxo e vira a resposta certa. Se o padrão spool não resolver o seu HPC, este item sobe de prioridade.
+Unlocks when: a case exists of a path stored by Scribo outside any Colligo custody, and path rot becomes a measured problem.
 
 ---
 
-## Output estruturado em sucesso
+## Resource predictor from history
 
-JSON no stdout com o que foi escrito, para pipelines que consomem o resultado da escrita programaticamente.
+"Will this job exceed the memory I asked for?" From the history of runs in `tool_runs`.
 
-Destrava quando: caso real de pipeline que precise disso. Hoje sucesso silencioso é feature.
+Status: Nextflow already does retry with memory escalation, which covers the practical case without predicting anything. The marginal value is knowing before instead of after a failure.
 
----
-
-## Suporte a Windows
-
-Nada impede (`filepath` em vez de strings), mas não será testado na v1. Atenção ao regime de permissões do banco restrito, que é POSIX.
-
-Decisão atual, igual à do Colligo: desenvolvimento e teste em Linux ou WSL. O binário nativo de Windows compila; banco restrito em Windows nativo é recusado.
-
-Destrava quando: houver usuário real em Windows e CI multiplataforma estável.
+Unlocks when: you are not using an orchestrator with retry, and the cost of OOM failures becomes measurable.
 
 ---
 
-## Registro de resultados em HPC sem servidor
+## PostgreSQL store
 
-Uso fora da bioinformática: varreduras de parâmetros e simulações onde MLflow ou W&B são pesados demais, precisam de servidor ou de internet. O Scribo já faz o essencial — upsert por chave, histórico, `diff` entre execuções —; faltaria documentação e exemplos.
+A second implementation of `db.Backend`.
 
-Destrava quando: aparecer usuário fora da bioinformática. Não muda código, só README.
+Status: the abstraction has existed since Slice 1 exactly for this. Differences to cover: dialect (`AUTOINCREMENT` versus `SERIAL`, `?` versus `$1`, `ON CONFLICT`, quoting), type model (SQLite's tolerant affinity versus Postgres's strict typing), concurrency model (WAL plus busy_timeout versus MVCC plus statement_timeout), DSN, and integration tests with a container.
 
----
+Unlocks when: a real case appears where SQLite does not suffice — multiple processes on different hosts, consortium scale, an institutional requirement. Not on speculative demand.
 
-## Regras além do vocabulário mínimo
-
-Expressões aritméticas em `scribo.rules.toml` (`F <= 0.5 * input.reads`), regras entre registros (réplicas técnicas dentro de uma tolerância), regras condicionais por `role`.
-
-Destrava quando: o vocabulário da v1 deixar de cobrir um caso real repetido. Linguagem de regras cresce fácil demais para crescer especulativamente.
+Note: on a network filesystem, Postgres stops being a luxury and becomes the right answer. If the spool pattern does not solve your HPC, this item rises in priority.
 
 ---
 
-## Outliers multivariados
+## Structured output on success
 
-Hoje `outliers` olha um campo por vez. Distância de Mahalanobis robusta (MCD) sobre vários campos pega a amostra que é normal em cada métrica isolada e estranha no conjunto.
+JSON on stdout with what was written, for pipelines that consume the result of the write programmatically.
 
-Destrava quando: o univariado deixar passar um caso real que o multivariado pegaria. Exige amostras suficientes por grupo para estimar covariância, o que raramente há em estudo pequeno.
+Unlocks when: a real pipeline case that needs it. Today silent success is a feature.
 
 ---
 
-## Configuração persistente
+## Windows support
 
-Arquivo de config para defaults de `--db`, `--busy-timeout`, `--step`.
+Nothing prevents it (`filepath` instead of strings), but it will not be tested in v1. Mind the permission regime of the restricted database, which is POSIX.
 
-Destrava quando: a repetição das mesmas flags virar atrito. Hoje variáveis de shell resolvem.
+Current decision, the same as Colligo's: development and testing on Linux or WSL. The native Windows binary compiles; a restricted database on native Windows is refused.
+
+Unlocks when: there is a real user on Windows and a stable cross-platform CI.
+
+---
+
+## Recording results on HPC without a server
+
+Use outside bioinformatics: parameter sweeps and simulations where MLflow or W&B are too heavy, need a server or the internet. Scribo already does the essentials — upsert by key, history, `diff` between runs —; documentation and examples would be missing.
+
+Unlocks when: a user outside bioinformatics appears. It changes no code, only the README.
+
+---
+
+## Rules beyond the minimum vocabulary
+
+Arithmetic expressions in `scribo.rules.toml` (`F <= 0.5 * input.reads`), rules between records (technical replicates within a tolerance), conditional rules by `role`.
+
+Unlocks when: the vocabulary of v1 stops covering a repeated real case. A rule language grows too easily to grow speculatively.
+
+---
+
+## Multivariate outliers
+
+Today `outliers` looks at one field at a time. A robust Mahalanobis distance (MCD) over several fields catches the sample that is normal in each metric in isolation and strange in the set.
+
+Unlocks when: the univariate one lets through a real case that the multivariate one would catch. It requires enough samples per group to estimate covariance, which a small study rarely has.
+
+---
+
+## Persistent configuration
+
+A config file for defaults of `--db`, `--busy-timeout`, `--step`.
+
+Unlocks when: repeating the same flags becomes friction. Today shell variables solve it.

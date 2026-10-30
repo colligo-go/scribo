@@ -1,42 +1,42 @@
-# Contrato Colligo ↔ Scribo
+# Colligo ↔ Scribo Contract
 
-Documento normativo compartilhado. Uma cópia idêntica vive em `Colligo/docs/CONTRACT.md` e em `Scribo/docs/CONTRACT.md`. **Divergência entre as duas cópias é bug**, e o CI de cada repositório compara a sua contra a do outro.
+Shared normative document. An identical copy lives in `Colligo/docs/CONTRACT.md` and in `Scribo/docs/CONTRACT.md`. **A divergence between the two copies is a bug**, and each repository's CI compares its copy against the other's.
 
-Este documento define tudo que as duas ferramentas escrevem ou leem em comum num mesmo banco. Fora daqui, cada uma é dona das próprias tabelas e nenhuma escreve nas tabelas da outra.
+This document defines everything the two tools write or read in common in the same database. Outside it, each one owns its own tables and neither writes to the other's tables.
 
-Versão do contrato: **1**.
-
----
-
-## 1. Princípio
-
-Integração por contrato, não por acoplamento de runtime. Um banco tocado pelas duas ferramentas tem uma trilha de execução única, uma identidade de amostra única e um grafo de dependências único — e nenhuma delas precisa estar instalada para a outra funcionar.
-
-Regras:
-
-- Cada tabela tem um dono. Só o dono escreve. A outra ferramenta lê.
-- As tabelas deste documento são criadas por quem chegar primeiro, com o DDL exato daqui.
-- Na abertura, cada ferramenta confere o schema efetivo das tabelas do contrato (`PRAGMA table_info`) contra o esperado. Divergência → erro `contract_mismatch`, sem escrever nada.
-- Mudança neste documento incrementa a versão e exige migration nas duas ferramentas no mesmo ciclo de release.
+Contract version: **1**.
 
 ---
 
-## 2. Abertura do banco
+## 1. Principle
 
-Idêntica nas duas ferramentas, implementada no núcleo comum (`store/open`).
+Integration by contract, not by runtime coupling. A database touched by both tools has a single execution trail, a single sample identity and a single dependency graph — and neither needs to be installed for the other to work.
 
-1. `statfs` no diretório do banco. Tipo de rede (`nfs`, `nfs4`, `cifs`, `smb2`, `lustre`, `gpfs`, `fuse.*`, `afs`, `9p`) → journal mode `DELETE`, com aviso no stderr. Local → `WAL`. Override explícito registrado em `tool_runs`.
-2. PRAGMAs no DSN, aplicados a toda conexão: `foreign_keys(1)`, `journal_mode(<resolvido>)`, `synchronous(NORMAL)`, `busy_timeout(<valor>)`, e `_txlock=immediate`.
-3. Leitura de volta em cada conexão nova. Divergência → `pragma_ineffective`.
-4. Conferência das tabelas do contrato (§1).
+Rules:
 
-Nenhuma das duas ferramentas abre um banco compartilhado em `WAL` sobre filesystem de rede. WAL exige memória compartilhada entre processos no mesmo host; em NFS é corrupção silenciosa.
+- Every table has an owner. Only the owner writes. The other tool reads.
+- The tables in this document are created by whoever arrives first, with the exact DDL given here.
+- On opening, each tool checks the effective schema of the contract tables (`PRAGMA table_info`) against the expected one. Divergence → `contract_mismatch` error, writing nothing.
+- A change to this document increments the version and requires a migration in both tools in the same release cycle.
 
 ---
 
-## 3. Tabelas do contrato
+## 2. Opening the database
 
-### `tool_runs` — dono: ambos, uma linha por execução de cada ferramenta
+Identical in both tools, implemented in the common core (`store/open`).
+
+1. `statfs` on the database directory. Network type (`nfs`, `nfs4`, `cifs`, `smb2`, `lustre`, `gpfs`, `fuse.*`, `afs`, `9p`) → journal mode `DELETE`, with a warning on stderr. Local → `WAL`. An explicit override is recorded in `tool_runs`.
+2. PRAGMAs in the DSN, applied to every connection: `foreign_keys(1)`, `journal_mode(<resolved>)`, `synchronous(NORMAL)`, `busy_timeout(<value>)`, and `_txlock=immediate`.
+3. Read back on each new connection. Divergence → `pragma_ineffective`.
+4. Check of the contract tables (§1).
+
+Neither tool opens a shared database in `WAL` on a network filesystem. WAL requires shared memory between processes on the same host; on NFS it is silent corruption.
+
+---
+
+## 3. Contract tables
+
+### `tool_runs` — owner: both, one row per execution of each tool
 
 ```sql
 CREATE TABLE IF NOT EXISTS tool_runs (
@@ -56,19 +56,19 @@ CREATE TABLE IF NOT EXISTS tool_runs (
 ) STRICT;
 ```
 
-Cada ferramenta só escreve as próprias linhas. `argv_shape` guarda a forma do comando, nunca valores. Timestamps em UTC, RFC 3339 com milissegundo.
+Each tool writes only its own rows. `argv_shape` stores the shape of the command, never values. Timestamps in UTC, RFC 3339 with millisecond precision.
 
-### `samples` — dono: Colligo
+### `samples` — owner: Colligo
 
-A tabela `samples` do Colligo é a fonte da identidade de amostra. O Scribo lê: `id`, `accession`, `experiment_id`, `role`, `replicate`. Resolver `--sample X` significa achar a linha cujo `accession` ou `id` é `X`.
+Colligo's `samples` table is the source of sample identity. Scribo reads: `id`, `accession`, `experiment_id`, `role`, `replicate`. Resolving `--sample X` means finding the row whose `accession` or `id` is `X`.
 
-### `files` e `facts` — dono: Colligo
+### `files` and `facts` — owner: Colligo
 
-O Scribo lê `files.blake3_root`, `files.path` e os fatos de `facts` indexados pela raiz. É assim que um resultado se liga a uma entrada verificada e é assim que as invariantes entrada × resultado (§5) obtêm, por exemplo, a contagem de reads da entrada.
+Scribo reads `files.blake3_root`, `files.path` and the facts of `facts` indexed by root. This is how a result is linked to a verified input and how the input × result invariants (§5) obtain, for example, the input's read count.
 
-### `result_inputs` — dono: Scribo
+### `result_inputs` — owner: Scribo
 
-Arestas de proveniência: cada valor de resultado aponta para as entradas de que depende.
+Provenance edges: each result value points to the inputs it depends on.
 
 ```sql
 CREATE TABLE IF NOT EXISTS result_inputs (
@@ -85,11 +85,11 @@ CREATE INDEX IF NOT EXISTS idx_result_inputs_root   ON result_inputs(input_root)
 CREATE INDEX IF NOT EXISTS idx_result_inputs_record ON result_inputs(result_table, record_key);
 ```
 
-`input_kind = 'file'` aponta para uma raiz BLAKE3 de arquivo. `input_kind = 'result'` aponta para outro resultado, codificado como raiz canônica do par `(result_table, record_key)`, o que permite cadeias de dependência entre resultados. `field` nulo significa que o registro inteiro depende da entrada.
+`input_kind = 'file'` points to a file's BLAKE3 root. `input_kind = 'result'` points to another result, encoded as the canonical root of the pair `(result_table, record_key)`, which allows dependency chains between results. A null `field` means that the whole record depends on the input.
 
-### `input_signals` — dono: Scribo; lida pelo Colligo
+### `input_signals` — owner: Scribo; read by Colligo
 
-Sinais que o Scribo observa depois do pipeline e que dizem algo sobre as entradas.
+Signals that Scribo observes after the pipeline and that say something about the inputs.
 
 ```sql
 CREATE TABLE IF NOT EXISTS input_signals (
@@ -104,53 +104,53 @@ CREATE TABLE IF NOT EXISTS input_signals (
 CREATE INDEX IF NOT EXISTS idx_input_signals_root ON input_signals(input_root);
 ```
 
-`source` diz de onde veio o sinal: `outlier:<campo>`, `somalier`, `ngscheckmate`, `invariant:<regra>`. `detail` é JSON canônico com os números que justificam o sinal. O Colligo consome estes sinais na custódia (§4); o Scribo nunca altera estado do Colligo diretamente.
+`source` says where the signal came from: `outlier:<field>`, `somalier`, `ngscheckmate`, `invariant:<rule>`. `detail` is canonical JSON with the numbers that justify the signal. Colligo consumes these signals in custody (§4); Scribo never changes Colligo's state directly.
 
 ---
 
-## 4. O que cada sinal significa para o Colligo
+## 4. What each signal means for Colligo
 
-| Sinal | Efeito na custódia do Colligo |
-| ----- | ----------------------------- |
-| `suspect` | Estado derivado `suspect` somado ao estado de custódia; `advisory`, listado em `status` com o `source` |
-| `identity_confirmed` | Afirmação `identity` aprovada; aparece no certificado |
-| `identity_mismatch` | Afirmação `identity` reprovada; `blocking` |
+| Signal | Effect on Colligo's custody |
+| ------ | --------------------------- |
+| `suspect` | Derived state `suspect` added to the custody state; `advisory`, listed in `status` with the `source` |
+| `identity_confirmed` | `identity` assertion passed; appears in the certificate |
+| `identity_mismatch` | `identity` assertion failed; `blocking` |
 
-O estado original de custódia nunca é sobrescrito. Sinal é afirmação a mais, com fonte declarada, na mesma lógica de declarado contra observado.
-
----
-
-## 5. Invariantes entrada × resultado
-
-O Scribo avalia regras que ligam um valor de resultado aos fatos das entradas. Vocabulário mínimo da v1:
-
-| Regra | Significado |
-| ----- | ----------- |
-| `F <= input.reads` | campo F não excede o total de reads das entradas declaradas |
-| `F <= input.bases` | idem para bases |
-| `F <= G` | campo F não excede o campo G do mesmo registro |
-| `F in [a, b]` | campo F no intervalo fechado |
-
-`input.reads` é a soma de `records.reads` dos fatos das entradas `file` do registro, lida da tabela `facts` do Colligo. Sem entrada sob custódia, regras `input.*` não são avaliadas e isso é reportado, nunca assumido como aprovado.
+The original custody state is never overwritten. A signal is one more assertion, with a declared source, in the same logic of declared against observed.
 
 ---
 
-## 6. Grafo de dependências e invalidação
+## 5. Input × result invariants
 
-Nós: raízes de arquivo, registros de resultado e accessions. Arestas: `result_inputs` (resultado → entrada) e a relação arquivo → amostra → accession do Colligo.
+Scribo evaluates rules that link a result value to the facts of the inputs. Minimum vocabulary of v1:
 
-Um resultado está **obsoleto** se algum nó alcançável a partir dele está invalidado: arquivo `stale`, `invalid` ou `superseded`; accession suprimida na fonte; sinal `identity_mismatch`; ou resultado de que ele depende já obsoleto. Obsolescência é alcançabilidade no grafo, calculada sob demanda, nunca gravada como coluna.
+| Rule | Meaning |
+| ---- | ------- |
+| `F <= input.reads` | field F does not exceed the total reads of the declared inputs |
+| `F <= input.bases` | the same for bases |
+| `F <= G` | field F does not exceed field G of the same record |
+| `F in [a, b]` | field F in the closed interval |
+
+`input.reads` is the sum of `records.reads` of the facts of the record's `file` inputs, read from Colligo's `facts` table. Without an input under custody, `input.*` rules are not evaluated and this is reported, never assumed to have passed.
 
 ---
 
-## 7. Completude de ponta a ponta
+## 6. Dependency graph and invalidation
 
-`colligo status` mostra o funil: declarado → baixado → verificado → processado. "Processado" significa que cada amostra do estudo tem, na tabela de resultados declarada em `[results]` do TOML do Colligo, os campos esperados preenchidos e não obsoletos. Sem tabela de resultados declarada, o funil termina em "verificado".
+Nodes: file roots, result records and accessions. Edges: `result_inputs` (result → input) and Colligo's file → sample → accession relation.
+
+A result is **stale** if any node reachable from it is invalidated: a `stale`, `invalid` or `superseded` file; an accession suppressed at the source; an `identity_mismatch` signal; or a result it depends on that is already stale. Staleness is reachability in the graph, computed on demand, never stored as a column.
 
 ---
 
-## 8. Uso real alimentando os dois
+## 7. End-to-end completeness
 
-- **Prioridade de scrub.** O Colligo ordena o scrub por número de resultados dependentes (contagem em `result_inputs`), depois por `last_verified_at`.
-- **Coleta de lixo.** O `gc` do Colligo usa `result_inputs` para distinguir arquivo sem uso, arquivo regenerável e arquivo insubstituível.
-- **Corpus de falhas.** Linhas `reconciled`, violações de invariante e sinais `suspect` são exportáveis (`scribo export-signals`) como casos para o `FAILURES.md` do Colligo.
+`colligo status` shows the funnel: declared → downloaded → verified → processed. "Processed" means that every sample of the study has, in the results table declared in `[results]` of Colligo's TOML, the expected fields filled in and not stale. Without a declared results table, the funnel ends at "verified".
+
+---
+
+## 8. Real use feeding both
+
+- **Scrub priority.** Colligo orders the scrub by number of dependent results (count in `result_inputs`), then by `last_verified_at`.
+- **Garbage collection.** Colligo's `gc` uses `result_inputs` to tell an unused file, a regenerable file and an irreplaceable file apart.
+- **Failure corpus.** `reconciled` rows, invariant violations and `suspect` signals are exportable (`scribo export-signals`) as cases for Colligo's `FAILURES.md`.
