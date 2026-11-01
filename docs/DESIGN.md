@@ -27,12 +27,14 @@ Scribo answers this together with Colligo. Colligo guarantees the inputs before 
 | sqlite-utils          | insert, upsert, query, export from CSV/TSV/JSON                              | history, provenance                                                                           |
 | sqlite-history        | trigger-based history with version, timestamp and mask of changed columns    | reconstruction CLI by date; provenance; binary without Python                                 |
 | Dolt                  | versioned SQL database, native `AS OF` and `dolt_history_<table>`, Go binary | not SQLite; does not know verified inputs nor invalidation                                    |
-| Nextflow data lineage | records path, size and checksum of a workflow's outputs                      | does not invalidate a result when the source changes later; does not store per-sample metrics |
+| Nextflow data lineage | records path, size and checksum of a workflow's outputs                      | does not invalidate a result when the source changes later; does not store per-sample metrics; `-resume` trusts path, size and modification time |
+| DVC                   | versions data and pipeline stages; `dvc status` lists stale stages           | trusts size and modification time by default; marks only the stage that reads a changed file, not what depends on it |
+| Dagster               | data assets with versions and staleness                                      | sees a changed source only through user code; staleness does not reach the final asset        |
 | MultiQC               | aggregates per-sample QC metrics in a report                                 | history between runs, provenance, invalidation                                                |
 
-History alone is saturated: a Scribo that only does that has no reason to exist. What is left, and nobody covers, is the combination with Colligo: **provenance per value, invalidation by reachability, input × result invariants and diff with cause.**
+History alone is saturated: a Scribo that only does that has no reason to exist. What is left, and none of the tools tested covers, is the combination with Colligo: **provenance per value, invalidation by reachability, input × result invariants and diff with cause.**
 
-Slice 0 tests exactly that, with the question reformulated: "does any tool link each result to the verified inputs and invalidate it when they change?". If the answer is yes, the project ends — and that is the best possible outcome.
+**Slice 0 outcome (2026-11-01).** Run by hand on the same two-step pipeline over real ENA FASTQ, Nextflow 26.10 with data lineage, DVC 3.67 and Dagster 1.13 all missed what Scribo is for: none marks the final result invalid when an input is replaced, none works per value and per sample, none reacts to an event of the source or of custody, none enforces input × result invariants, and two of the three trust a file's size and modification time by default, so a FASTQ corrupted with the same stat passed in silence (`RELATED.md` §3). Scribo therefore exists, as its own binary in its own repository, sharing with Colligo only the contract of `CONTRACT.md`, which CI keeps identical in both repositories and which tests exercise across the two implementations (§5).
 
 ---
 
@@ -166,16 +168,17 @@ Latest stable Go. MIT. cobra. v0 until the interface stabilises.
 
 ## 5. Relationship with Colligo
 
-### One module, two binaries — proposed decision
+### Separate repositories, one contract — decided in Slice 0
 
-With provenance, invariants and invalidation, Scribo comes to need Colligo's fact extractor, the `tool_runs` contract and the database opening. The duplication that "had not yet triggered" triggers here.
+Scribo reads what Colligo writes in the shared database — `samples`, `files`, `facts`, `tool_runs` — and Colligo reads what Scribo writes for it (`input_signals`). They meet in the database, not in code.
 
-Options:
+Options weighed:
 
-1. **One module, two binaries.** `colligo` and `scribo` import a common core: `facts`, `runs`, `store/open`. It keeps the name and the generic tool for those who do not use Colligo.
-2. **One binary.** Scribo becomes the results side: `colligo record`, `colligo stale`, `colligo diff`.
+1. **One module, two binaries**, with a common core (`facts`, `runs`, `store/open`).
+2. **One binary**, Scribo as the results side of `colligo`.
+3. **Separate repositories**, each with its own code, sharing only the contract.
 
-Proposal: **option 1**. The final decision is part of Slice 0. Until then, `CONTRACT.md` guarantees that the two tools talk without sharing code.
+Decision: **option 3**. One module would tie the two versions to the same tags, let a change on one side ship a bug in the other's release, and make Scribo public with Colligo. Its one real benefit — a single implementation of the database contract — is kept another way: `CONTRACT.md` is identical in both repositories and CI fails when the copies diverge (`.github/check-contract.sh`); Scribo's Slice 1 accepts a `tool_runs` created by Colligo and refuses a divergent one with `contract_mismatch`, and Colligo's Slice 3 accepts a `tool_runs` created by Scribo. A piece of code is shared only if the same logic ends up duplicated and a bug in it shows up on both sides; that is the trigger to revisit this.
 
 ### What Scribo gives Colligo
 

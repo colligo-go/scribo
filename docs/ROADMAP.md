@@ -1,12 +1,12 @@
 # Scribo — Roadmap
 
-> **Current state: Slice 0 — decision pending.** Nothing should be built before it.
+> **Current slice: 1 — Vertical: upsert, history, `--at`.** Slice 0 is closed: Scribo exists, as its own binary in its own repository (`DESIGN.md` §2 and §5). Nothing outside Slice 1 should be built yet.
 
 The rule of this document: a thin slice end to end before breadth. There is no code yet: Slice 1 is written from this SPEC.
 
 ---
 
-## Slice 0 — Decide whether Scribo needs to exist, and in what form
+## Slice 0 — Decide whether Scribo needs to exist, and in what form (closed)
 
 It is not code.
 
@@ -16,9 +16,11 @@ It is not code.
 
 Definition of done: two sentences in `DESIGN.md` — what the existing tools lacked, and the chosen form. If nothing was lacking, the project ends here.
 
+Outcome (2026-11-01): the tools tested lacked transitive invalidation, per-value provenance, source and custody events and input × result invariants, and two of three trust size and modification time (`DESIGN.md` §2, `RELATED.md` §3). Form: its own binary in its own repository, sharing only `CONTRACT.md` with Colligo (`DESIGN.md` §5).
+
 ---
 
-## Slice 1 — Vertical: upsert, history, `--at`
+## Slice 1 — Vertical: upsert, history, `--at` (current)
 
 The heart, rewritten per the SPEC.
 
