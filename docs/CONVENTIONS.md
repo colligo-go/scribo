@@ -120,4 +120,4 @@ House style. Inviolable during implementation. Short on purpose.
 
 Small commits, by slice or sub-slice. `.github/check-names.sh` checks the branch name, PR title and each commit of the PR in the PR's CI; a branch or message outside the pattern turns the PR red. The rule applies from the PR that introduced it onwards; the earlier history is not rewritten by it.
 
-**`CONTRACT.md` is compared with Colligo's copy in CI.** `.github/check-contract.sh` downloads `docs/CONTRACT.md` from `main` of `colligo-go/colligo` and fails if it differs from the local one. While Colligo's repository is private, the job needs the `COLLIGO_READ_TOKEN` secret.
+**`CONTRACT.md` is compared with Colligo's copy in CI.** `.github/check-contract.sh` downloads `docs/CONTRACT.md` from `main` of `colligo-go/colligo` and fails if it differs from the local one. Colligo's repository is public, so the job needs no token.

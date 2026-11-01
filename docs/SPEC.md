@@ -64,7 +64,7 @@ scribo/
 └── testdata/
 ```
 
-Everything in `internal/`. When the common core with Colligo exists (`DESIGN.md` §5), `db/sqlite/open.go`, `db/sqlite/fsdetect.go`, `contract/` and the root computation of `provenance/` come to import from it.
+Everything in `internal/`. Scribo shares no code with Colligo (`DESIGN.md` §5): `db/sqlite/open.go`, `db/sqlite/fsdetect.go` and `contract/` implement `CONTRACT.md` here, and tests check them against a database created by Colligo.
 
 ---
 
