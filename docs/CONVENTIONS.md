@@ -72,6 +72,8 @@ House style. Inviolable during implementation. Short on purpose.
 
 **Integration of the complete binary.** Run the binary in a subprocess and check database, stdout, stderr and exit code. Unit tests only for complex isolated logic: value parsing, affinity coercion, construction of `record_key`.
 
+**The binary under test is built with `-race`.** `go test -race` instruments only the test process, not a binary it runs as a subprocess; without the flag, a data race in Scribo itself goes unseen.
+
 **SQLite in the test's tmpdir**, never outside it. No tests that touch the network.
 
 **Leak sentinel.** A unique, improbable value as a path and as a field value, with grep over all output produced, including `argv_shape` and the database.

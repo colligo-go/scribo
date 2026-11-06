@@ -14,6 +14,7 @@ const (
 const (
 	CodeUsage        = "usage"
 	CodeInvalidValue = "invalid_value"
+	CodeInternal     = "internal"
 )
 
 type Error struct {
