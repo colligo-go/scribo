@@ -38,6 +38,9 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      - name: Vet for macOS
+        run: GOOS=darwin GOARCH=arm64 go vet ./...
+
       - name: Test
         run: go test -race -count=2 ./...
 

@@ -41,3 +41,21 @@ func TestStatusesAreDistinct(t *testing.T) {
 		seen[status] = true
 	}
 }
+
+func TestWarningFormat(t *testing.T) {
+	tests := []struct {
+		name    string
+		warning Warning
+		want    string
+	}{
+		{"with context", Warning{"network_filesystem", "journal mode DELETE", "spool"}, "WARNING [network_filesystem]: journal mode DELETE\n→ spool\n"},
+		{"without context", Warning{"network_filesystem", "journal mode DELETE", ""}, "WARNING [network_filesystem]: journal mode DELETE\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.warning.Format(); got != tt.want {
+				t.Errorf("Format() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
