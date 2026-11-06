@@ -28,6 +28,9 @@ func New() *Backend {
 }
 
 func (b *Backend) Open(ctx context.Context, path string, opts db.OpenOptions) error {
+	if b.db != nil {
+		return exitcode.New(exitcode.System, exitcode.CodeInternal, "backend already open", "")
+	}
 	absPath, err := filepath.Abs(path)
 	if err != nil {
 		return classifyFileError(err, path)
@@ -67,17 +70,18 @@ func (b *Backend) Open(ctx context.Context, path string, opts db.OpenOptions) er
 
 	if err := handle.PingContext(ctx); err != nil {
 		handle.Close()
+		translated := translate(err)
 		var domain *exitcode.Error
-		if errors.As(err, &domain) {
+		if errors.As(translated, &domain) {
 			return domain
 		}
-		return classifyFileError(err, absPath)
+		return classifyFileError(translated, absPath)
 	}
 	b.db = handle
 
 	if err := b.checkTable(ctx, "tool_runs", contract.ToolRunsDDL); err != nil {
 		b.Close()
-		return err
+		return translate(err)
 	}
 	return nil
 }
@@ -88,7 +92,7 @@ func (b *Backend) Close() error {
 	}
 	err := b.db.Close()
 	b.db = nil
-	return err
+	return translate(err)
 }
 
 func (b *Backend) JournalMode() string {
@@ -107,7 +111,7 @@ func (b *Backend) TableExists(ctx context.Context, table string) (bool, error) {
 		return false, nil
 	}
 	if err != nil {
-		return false, err
+		return false, translate(err)
 	}
 	return true, nil
 }

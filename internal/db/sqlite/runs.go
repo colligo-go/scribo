@@ -35,11 +35,11 @@ func (b *Backend) BeginRun(ctx context.Context, meta db.RunMeta) (int64, error) 
 		runID, err = result.LastInsertId()
 		return err
 	})
-	return runID, err
+	return runID, translate(err)
 }
 
 func (b *Backend) EndRun(ctx context.Context, runID int64, exitCode int) error {
-	return b.inTx(ctx, func(tx *sql.Tx) error {
+	return translate(b.inTx(ctx, func(tx *sql.Tx) error {
 		result, err := tx.ExecContext(ctx,
 			`UPDATE tool_runs SET ended_at = ?, exit_code = ?
 			WHERE id = ? AND tool = 'scribo' AND ended_at IS NULL`,
@@ -56,5 +56,5 @@ func (b *Backend) EndRun(ctx context.Context, runID int64, exitCode int) error {
 				fmt.Sprintf("run %d is not an open Scribo run", runID), "")
 		}
 		return nil
-	})
+	}))
 }

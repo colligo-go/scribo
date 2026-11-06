@@ -39,9 +39,9 @@ func (b *Backend) EnsureContractTables(ctx context.Context) error {
 		return err
 	})
 	if err != nil {
-		return err
+		return translate(err)
 	}
-	return b.checkTable(ctx, "tool_runs", contract.ToolRunsDDL)
+	return translate(b.checkTable(ctx, "tool_runs", contract.ToolRunsDDL))
 }
 
 func (b *Backend) checkTable(ctx context.Context, table, ddl string) error {

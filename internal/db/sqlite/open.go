@@ -38,7 +38,8 @@ func buildDSN(absPath string, journalMode string, busyTimeoutMS int) string {
 func verifyPragmas(conn sqlite.ExecQuerierContext, dsn string) error {
 	location, err := url.Parse(dsn)
 	if err != nil {
-		return nil
+		return exitcode.New(exitcode.System, exitcode.CodePragmaIneffective,
+			"cannot read the DSN back to verify the PRAGMAs", err.Error())
 	}
 	query := location.Query()
 	for _, key := range verifiedPragmas {

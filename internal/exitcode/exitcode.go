@@ -22,6 +22,14 @@ const (
 	CodeIOError           = "io_error"
 	CodeNetworkFilesystem = "network_filesystem"
 	CodeContractMismatch  = "contract_mismatch"
+	CodeDBBusy            = "db_busy"
+	CodeConstraintFailed  = "constraint_failed"
+	CodeReservedTable     = "reserved_table"
+	CodeAmbiguousKey      = "ambiguous_key"
+	CodeTableNotFound     = "table_not_found"
+	CodeColumnNotFound    = "column_not_found"
+	CodeKeyNotFound       = "key_not_found"
+	CodeKeyAlreadyExists  = "key_already_exists"
 )
 
 type Error struct {
