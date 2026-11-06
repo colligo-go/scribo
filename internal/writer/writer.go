@@ -12,6 +12,7 @@ import (
 	"github.com/colligo-go/scribo/internal/exitcode"
 	"github.com/colligo-go/scribo/internal/history"
 	"github.com/colligo-go/scribo/internal/run"
+	"github.com/colligo-go/scribo/internal/validate"
 )
 
 type Request struct {
@@ -24,23 +25,6 @@ type Request struct {
 	ArgvShape   string
 }
 
-var reservedTables = map[string]bool{
-	"tool_runs":     true,
-	"result_inputs": true,
-	"input_signals": true,
-	"samples":       true,
-	"files":         true,
-	"facts":         true,
-	"study_meta":    true,
-}
-
-func isReserved(table string) bool {
-	lower := strings.ToLower(table)
-	return reservedTables[lower] ||
-		strings.HasSuffix(lower, "_history") ||
-		strings.HasPrefix(lower, "sqlite_")
-}
-
 func Upsert(ctx context.Context, backend db.Backend, req Request, warn func(exitcode.Warning)) error {
 	if err := backend.Open(ctx, req.DB, db.OpenOptions{BusyTimeout: req.BusyTimeout}); err != nil {
 		return err
@@ -50,46 +34,13 @@ func Upsert(ctx context.Context, backend db.Backend, req Request, warn func(exit
 		warn(warning)
 	}
 
-	if isReserved(req.Table) {
-		return exitcode.New(exitcode.Database, exitcode.CodeReservedTable,
-			fmt.Sprintf("%s is a reserved table", req.Table),
-			"Scribo and Colligo own this table; name a data table")
-	}
-	exists, err := backend.TableExists(ctx, req.Table)
+	byName, err := validate.Columns(ctx, backend, req.Table, sortedNames(req.Key, req.Values))
 	if err != nil {
 		return err
 	}
-	if !exists {
-		return exitcode.New(exitcode.Database, exitcode.CodeTableNotFound,
-			fmt.Sprintf("table %s does not exist", req.Table),
-			"Scribo never creates a data table; create it first, for example from 'scribo schema'")
-	}
-
-	columns, err := backend.Columns(ctx, req.Table)
+	canonicalKey, err := validate.CanonicalKey(byName, req.Key)
 	if err != nil {
 		return err
-	}
-	byName := make(map[string]db.Column, len(columns))
-	names := make([]string, len(columns))
-	for i, column := range columns {
-		byName[column.Name] = column
-		names[i] = column.Name
-	}
-	for _, name := range sortedNames(req.Key, req.Values) {
-		if _, ok := byName[name]; !ok {
-			return exitcode.New(exitcode.Database, exitcode.CodeColumnNotFound,
-				fmt.Sprintf("column %s does not exist in %s", name, req.Table),
-				suggestion(name, names))
-		}
-	}
-
-	canonicalKey := make(db.Key, len(req.Key))
-	for name, value := range req.Key {
-		canonical, err := db.Canonical(byName[name], value)
-		if err != nil {
-			return err
-		}
-		canonicalKey[name] = canonical
 	}
 	for name, value := range req.Values {
 		if _, err := db.Coerce(byName[name], value); err != nil {

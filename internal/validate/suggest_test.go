@@ -1,4 +1,4 @@
-package writer
+package validate
 
 import (
 	"strings"
@@ -19,7 +19,7 @@ func TestSuggestion(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := suggestion(tt.name, columns); got != tt.want {
+			if got := Suggestion(tt.name, columns); got != tt.want {
 				t.Errorf("suggestion(%q) = %q, want %q", tt.name, got, tt.want)
 			}
 		})
@@ -27,7 +27,7 @@ func TestSuggestion(t *testing.T) {
 }
 
 func TestSuggestionTieGoesToTheAlphabeticallyFirst(t *testing.T) {
-	if got := suggestion("ab", []string{"ac", "aa"}); got != `did you mean "aa"?` {
+	if got := Suggestion("ab", []string{"ac", "aa"}); got != `did you mean "aa"?` {
 		t.Errorf("got %q", got)
 	}
 }
@@ -37,7 +37,7 @@ func TestSuggestionListsAtMostTwentyColumns(t *testing.T) {
 	for _, letter := range "abcdefghijklmnopqrstuvwxyz" {
 		columns = append(columns, strings.Repeat(string(letter), 9))
 	}
-	got := suggestion("0000000000", columns)
+	got := Suggestion("0000000000", columns)
 	if listed := strings.Count(got, ",") + 1; listed != 20 {
 		t.Errorf("listed %d columns, want 20: %s", listed, got)
 	}
@@ -51,12 +51,12 @@ func TestEditDistanceCountsRunesNotBytes(t *testing.T) {
 
 func TestReservedTables(t *testing.T) {
 	for _, name := range []string{"tool_runs", "TOOL_RUNS", "samples", "files", "facts", "result_inputs", "input_signals", "study_meta", "x_history", "X_HISTORY", "sqlite_master", "SQLITE_sequence"} {
-		if !isReserved(name) {
+		if !Reserved(name) {
 			t.Errorf("%s should be reserved", name)
 		}
 	}
 	for _, name := range []string{"rnaseq_qc", "history", "my_sqlite", "samples2"} {
-		if isReserved(name) {
+		if Reserved(name) {
 			t.Errorf("%s should not be reserved", name)
 		}
 	}

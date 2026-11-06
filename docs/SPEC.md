@@ -96,6 +96,8 @@ type Backend interface {
     InvalidatedNodes(ctx context.Context) ([]Node, error)
     Edges(ctx context.Context) ([]Edge, error)
     HistoryBetween(ctx context.Context, table string, runA, runB int64) ([]HistoryRow, error)
+    HistoryOf(ctx context.Context, table, recordKey, field string) ([]HistoryRow, error)
+    RecordExists(ctx context.Context, table string, key Key) (bool, error)
 
     BeginTx(ctx context.Context) (Tx, error)
 }
@@ -113,6 +115,8 @@ type Tx interface {
 ```
 
 `SelectRow` returns `false` when no record matches the key and an `ambiguous_key` error (exit 3) when two or more do: the key columns must be `UNIQUE`. It matches with `IS`, so a NULL key value matches a NULL, and it reads every column as `+"column"`: the unary plus gives the expression no declared type, so the driver does not turn the text of a `DATE`, `DATETIME` or `TIMESTAMP` column into a `time.Time` that would no longer read back as the same text. `Upsert` reads the record, writes with `INSERT` or `UPDATE`, reads it again and reports the fields whose stored text differs, ordered by field name; a record that did not exist has a NULL old value for every field. `Rollback` after `Commit` returns nil so that `defer tx.Rollback()` is safe.
+
+`HistoryOf` and `RecordExists` serve `log` and never feed the history: they read outside any transaction. `HistoryOf` on a table without `{table}_history` returns no rows and creates nothing.
 
 While a `Tx` is open, every method of the `Backend` returns an `internal` error, because the pool holds one connection and the call would otherwise wait for ever. Every identifier that comes from the user is quoted with `quoteIdent` (double quotes, an embedded quote doubled); values always go as `?` parameters.
 
@@ -225,6 +229,16 @@ type Node struct {
 type Edge struct {
     From string
     To   string
+}
+
+type HistoryRow struct {
+    ID        int64
+    RunID     int64
+    Field     string
+    Source    string
+    ChangedAt string
+    Old       Value
+    New       Value
 }
 
 type Row  map[string]Value
@@ -359,7 +373,7 @@ The warning goes to stderr only after the commit, with code `history_reconciled`
 
 Known limit: if the write fails after the reconciliation, the rollback also undoes the `reconciled` rows. The gap is still there and the next successful write to the record detects it again; until then, nothing records that it was seen.
 
-A `log --at` that crosses `reconciled` warns that the state before that point is approximate. History is never deleted nor rewritten.
+A `log --at` that crosses `reconciled` warns that the state before that point is approximate. Precisely: the state at a moment is, per field, the `new_value` of the last row with `changed_at <= at`, and a field is approximate when its first row after `at` is `reconciled`, because the change made outside Scribo happened at some unknown moment between the last row Scribo knew and the detection. The warning is `history_approximate`, one per field, on stderr. History is never deleted nor rewritten.
 
 ---
 
@@ -488,8 +502,14 @@ In `--batch`, the special columns `_sample` and `_input` (a `;`-separated list) 
 ### log
 
 ```
-scribo log --db DB --table T --key K=V... [--field F] [--at TIMESTAMP]
+scribo log --db DB --table T --key K=V... [--field F] [--at TIMESTAMP] [--format tsv|json]
 ```
+
+Without `--at`, one line per history row in `(changed_at, id)` order. TSV (the default) has the header `changed_at  run_id  source  field  old_value  old_is_null  new_value  new_is_null`; a NULL is an empty cell with `is_null` 1; every value escapes `\` as `\\`, tab as `\t`, LF as `\n` and CR as `\r`. JSON is one object per line, `{"changed_at":…,"run_id":N,"source":…,"field":…,"old":"x"|null,"new":"y"|null}`, without HTML escaping.
+
+With `--at`, the state at that moment: TSV `field  value  is_null`, one line per field in alphabetical order, or a single JSON object with the fields as sorted keys. `TIMESTAMP` is RFC 3339 with a time and a zone, truncated to the millisecond in UTC; a date alone is ambiguous and is a usage error. `--field` limits both forms to one field and must name a column.
+
+A key with no history: `key_not_found` (exit 3) when no record has it, an empty result (header only, exit 0) when the record exists but was never written by Scribo. `log` writes nothing: no `tool_runs` row, no contract or history table created.
 
 ### query, export
 
@@ -587,9 +607,9 @@ ERROR [<typed_code>]: <main message>
 → <context, line of the error, suggestion>
 ```
 
-Typed codes: `table_not_found`, `column_not_found`, `key_not_found`, `key_already_exists`, `invalid_value`, `untyped_comparison`, `unknown_sample`, `input_not_found`, `invalid_rules`, `invariant_violated`, `rule_unavailable`, `colligo_required`, `contract_mismatch`, `stale_results`, `nondeterministic_change`, `file_not_found`, `invalid_format`, `batch_failed`, `db_busy`, `permission_denied`, `synced_path`, `pragma_ineffective`, `usage`, `internal`, `io_error`, `network_filesystem`, `constraint_failed`, `reserved_table`, `ambiguous_key`, `history_reconciled`.
+Typed codes: `table_not_found`, `column_not_found`, `key_not_found`, `key_already_exists`, `invalid_value`, `untyped_comparison`, `unknown_sample`, `input_not_found`, `invalid_rules`, `invariant_violated`, `rule_unavailable`, `colligo_required`, `contract_mismatch`, `stale_results`, `nondeterministic_change`, `file_not_found`, `invalid_format`, `batch_failed`, `db_busy`, `permission_denied`, `synced_path`, `pragma_ineffective`, `usage`, `internal`, `io_error`, `network_filesystem`, `constraint_failed`, `reserved_table`, `ambiguous_key`, `history_reconciled`, `history_approximate`.
 
-New in Slice 1: `constraint_failed` (the database refused a value: NOT NULL, UNIQUE, CHECK or a trigger; exit 3), `reserved_table` (the table is one Scribo or Colligo owns, or a `_history` or `sqlite_` table; exit 2), `ambiguous_key` (a key matches more than one record because its columns are not UNIQUE; exit 3), `io_error` (a database error with no more specific code, exit 5) and the warnings `network_filesystem` and `history_reconciled` (§6), which never change the exit status.
+New in Slice 1: `constraint_failed` (the database refused a value: NOT NULL, UNIQUE, CHECK or a trigger; exit 3), `reserved_table` (the table is one Scribo or Colligo owns, or a `_history` or `sqlite_` table; exit 2), `ambiguous_key` (a key matches more than one record because its columns are not UNIQUE; exit 3), `io_error` (a database error with no more specific code, exit 5) and the warnings `network_filesystem`, `history_reconciled` and `history_approximate` (§6), which never change the exit status.
 
 Warnings use the same shape with a different prefix, and do not change the exit status:
 

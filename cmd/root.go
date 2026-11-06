@@ -32,6 +32,7 @@ func newRootCommand() *cobra.Command {
 	root.PersistentFlags().StringVar(&options.table, "table", "", "name of the data table")
 	root.PersistentFlags().IntVar(&options.busyTimeout, "busy-timeout", 5000, "milliseconds to wait for a lock held by another process")
 	root.AddCommand(newUpsertCommand(options))
+	root.AddCommand(newLogCommand(options))
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
 		return usageError(err)
 	})
