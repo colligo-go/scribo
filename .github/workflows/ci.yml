@@ -32,6 +32,15 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test -race -count=2 ./...
+
       - name: Secrets in history
         run: |
           go install github.com/zricethezav/gitleaks/v8@v8.30.1
