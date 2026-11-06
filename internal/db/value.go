@@ -8,6 +8,15 @@ type Value struct {
 	IsNull bool
 }
 
+// Equal reports whether two values are the same stored value: both NULL, or
+// both non-NULL with the same text. The Raw of a NULL is ignored.
+func (v Value) Equal(other Value) bool {
+	if v.IsNull || other.IsNull {
+		return v.IsNull == other.IsNull
+	}
+	return v.Raw == other.Raw
+}
+
 // Key identifies one record: the field names of its key columns mapped to
 // their values. The map has no order of its own; ordering is applied where a
 // canonical form is built.

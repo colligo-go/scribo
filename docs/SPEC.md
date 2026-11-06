@@ -349,6 +349,16 @@ An error before 10 writes nothing. An error from 11 on leaves the data table, it
 - Divergent field → a `source='reconciled'` row with `old_value` from the projected and `new_value` from the current, `changed_at` of the detection. Warning on stderr.
 - Field with no history at all → a record prior to Scribo's adoption. Ignored.
 
+- Record deleted from outside (no row for the key) → a `reconciled` row per field with history, `new_value` NULL, unless the projected value is already NULL.
+
+`ProjectedRow` takes, per field, the `new_value` of the last history row of the record in `(changed_at, id)` order, with `ROW_NUMBER() OVER (PARTITION BY field ORDER BY changed_at DESC, id DESC)`. Values are compared in the stored, rendered form (§7): `94.30` written from outside over `94.3` in a `REAL` column is no change.
+
+Reconciliation runs inside the transaction of the write, after `BeginTx` and before `Upsert`, and its rows carry the same `run_id` and the same `changed_at` as the write's own rows. They are appended first and so get the lower ids: the chain `old → new` of every field stays continuous, a `reconciled` row followed by the `scribo` row that starts from its `new_value`.
+
+The warning goes to stderr only after the commit, with code `history_reconciled`, and names the table, the fields and the `record_key`, never a value: `rnaseq_qc: 2 fields changed outside Scribo: Mapped_Reads, note; history reconciled`, or `rnaseq_qc: record deleted outside Scribo; history reconciled`.
+
+Known limit: if the write fails after the reconciliation, the rollback also undoes the `reconciled` rows. The gap is still there and the next successful write to the record detects it again; until then, nothing records that it was seen.
+
 A `log --at` that crosses `reconciled` warns that the state before that point is approximate. History is never deleted nor rewritten.
 
 ---
@@ -577,9 +587,9 @@ ERROR [<typed_code>]: <main message>
 → <context, line of the error, suggestion>
 ```
 
-Typed codes: `table_not_found`, `column_not_found`, `key_not_found`, `key_already_exists`, `invalid_value`, `untyped_comparison`, `unknown_sample`, `input_not_found`, `invalid_rules`, `invariant_violated`, `rule_unavailable`, `colligo_required`, `contract_mismatch`, `stale_results`, `nondeterministic_change`, `file_not_found`, `invalid_format`, `batch_failed`, `db_busy`, `permission_denied`, `synced_path`, `pragma_ineffective`, `usage`, `internal`, `io_error`, `network_filesystem`, `constraint_failed`, `reserved_table`, `ambiguous_key`.
+Typed codes: `table_not_found`, `column_not_found`, `key_not_found`, `key_already_exists`, `invalid_value`, `untyped_comparison`, `unknown_sample`, `input_not_found`, `invalid_rules`, `invariant_violated`, `rule_unavailable`, `colligo_required`, `contract_mismatch`, `stale_results`, `nondeterministic_change`, `file_not_found`, `invalid_format`, `batch_failed`, `db_busy`, `permission_denied`, `synced_path`, `pragma_ineffective`, `usage`, `internal`, `io_error`, `network_filesystem`, `constraint_failed`, `reserved_table`, `ambiguous_key`, `history_reconciled`.
 
-New in Slice 1: `constraint_failed` (the database refused a value: NOT NULL, UNIQUE, CHECK or a trigger; exit 3), `reserved_table` (the table is one Scribo or Colligo owns, or a `_history` or `sqlite_` table; exit 2), `ambiguous_key` (a key matches more than one record because its columns are not UNIQUE; exit 3), `io_error` (a database error with no more specific code, exit 5) and `network_filesystem`, which is a warning, never an error.
+New in Slice 1: `constraint_failed` (the database refused a value: NOT NULL, UNIQUE, CHECK or a trigger; exit 3), `reserved_table` (the table is one Scribo or Colligo owns, or a `_history` or `sqlite_` table; exit 2), `ambiguous_key` (a key matches more than one record because its columns are not UNIQUE; exit 3), `io_error` (a database error with no more specific code, exit 5) and the warnings `network_filesystem` and `history_reconciled` (§6), which never change the exit status.
 
 Warnings use the same shape with a different prefix, and do not change the exit status:
 

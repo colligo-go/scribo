@@ -30,6 +30,7 @@ const (
 	CodeColumnNotFound    = "column_not_found"
 	CodeKeyNotFound       = "key_not_found"
 	CodeKeyAlreadyExists  = "key_already_exists"
+	CodeHistoryReconciled = "history_reconciled"
 )
 
 type Error struct {

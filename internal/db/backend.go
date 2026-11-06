@@ -67,6 +67,11 @@ type Tx interface {
 	// ambiguous_key error, never an arbitrary pick.
 	SelectRow(ctx context.Context, table string, key Key, fields []string) (Row, bool, error)
 
+	// ProjectedRow is the state the history asserts for a record: for each
+	// field with history, the new value of its last row in (changed_at, id)
+	// order. A record with no history gives an empty Row.
+	ProjectedRow(ctx context.Context, table string, recordKey string) (Row, error)
+
 	// Upsert writes values to the record the key names, as mode allows, and
 	// returns the fields whose stored value changed, ordered by field name.
 	// Key fields never appear in the result.

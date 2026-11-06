@@ -112,7 +112,7 @@ func Upsert(ctx context.Context, backend db.Backend, req Request, warn func(exit
 	if err != nil {
 		return err
 	}
-	writeErr := write(ctx, backend, req, canonicalKey, recordKey, runID)
+	writeErr := write(ctx, backend, req, canonicalKey, recordKey, runID, warn)
 	if writeErr != nil {
 		if endErr := backend.EndRun(ctx, runID, statusOf(writeErr)); endErr != nil {
 			warn(exitcode.Warning{
@@ -125,23 +125,81 @@ func Upsert(ctx context.Context, backend db.Backend, req Request, warn func(exit
 	return backend.EndRun(ctx, runID, exitcode.OK)
 }
 
-func write(ctx context.Context, backend db.Backend, req Request, key db.Key, recordKey string, runID int64) error {
+func write(ctx context.Context, backend db.Backend, req Request, key db.Key, recordKey string, runID int64, warn func(exitcode.Warning)) error {
 	tx, err := backend.BeginTx(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+	at := time.Now()
+
+	reconciled, deleted, err := reconcile(ctx, tx, req.Table, key, recordKey, runID, at)
+	if err != nil {
+		return err
+	}
 
 	changes, err := tx.Upsert(ctx, req.Table, key, req.Values, req.Mode)
 	if err != nil {
 		return err
 	}
 	if len(changes) > 0 {
-		if err := tx.AppendHistory(ctx, req.Table, recordKey, changes, runID, time.Now(), db.SourceScribo); err != nil {
+		if err := tx.AppendHistory(ctx, req.Table, recordKey, changes, runID, at, db.SourceScribo); err != nil {
 			return err
 		}
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	if len(reconciled) > 0 {
+		warn(reconciledWarning(req.Table, recordKey, reconciled, deleted))
+	}
+	return nil
+}
+
+func reconcile(ctx context.Context, tx db.Tx, table string, key db.Key, recordKey string, runID int64, at time.Time) ([]db.FieldChange, bool, error) {
+	projected, err := tx.ProjectedRow(ctx, table, recordKey)
+	if err != nil || len(projected) == 0 {
+		return nil, false, err
+	}
+	fields := make([]string, 0, len(projected))
+	for field := range projected {
+		fields = append(fields, field)
+	}
+	sort.Strings(fields)
+
+	current, found, err := tx.SelectRow(ctx, table, key, fields)
+	if err != nil {
+		return nil, false, err
+	}
+	changes := history.Reconcile(projected, current, found)
+	if len(changes) == 0 {
+		return nil, false, nil
+	}
+	if err := tx.AppendHistory(ctx, table, recordKey, changes, runID, at, db.SourceReconciled); err != nil {
+		return nil, false, err
+	}
+	return changes, !found, nil
+}
+
+func reconciledWarning(table, recordKey string, changes []db.FieldChange, deleted bool) exitcode.Warning {
+	message := fmt.Sprintf("%s: record deleted outside Scribo; history reconciled", table)
+	if !deleted {
+		fields := make([]string, len(changes))
+		for i, change := range changes {
+			fields[i] = change.Field
+		}
+		noun := "fields"
+		if len(fields) == 1 {
+			noun = "field"
+		}
+		message = fmt.Sprintf("%s: %d %s changed outside Scribo: %s; history reconciled",
+			table, len(fields), noun, strings.Join(fields, ", "))
+	}
+	return exitcode.Warning{
+		Code:    exitcode.CodeHistoryReconciled,
+		Message: message,
+		Context: "record " + recordKey,
+	}
 }
 
 func statusOf(err error) int {
