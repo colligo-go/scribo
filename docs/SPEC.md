@@ -453,6 +453,22 @@ scribo upsert --db DB --table T [--key K=V]... [--sample S] [FIELD=VALUE]... [--
 scribo upsert --db DB --table T --batch PATH|- [--format csv|tsv|json] [--empty-as-null]
 ```
 
+Flags of Slice 1:
+
+```
+--db           path of the database file, which must already exist   required
+--table        name of the data table, which must already exist      required
+--key          FIELD=VALUE naming the record; repeat for a composite key   required
+--null         FIELD to set to a real NULL; repeatable
+--insert-only  key_already_exists if the record exists
+--update-only  key_not_found if the record does not exist
+--busy-timeout milliseconds to wait for a lock; default 5000, must be positive
+```
+
+`FIELD=VALUE` arguments are split at the first `=` and `--key` and `--null` are repeatable string flags that are never split on commas, so a value or a key such as `a,b` stays one value. A usage error (exit 1) is raised before the database is opened for: a missing `--db`, `--table` or `--key`; nothing to write; an argument without `=` or with an empty name; a field given twice, including `FIELD=1` with `--null FIELD`; a key field also written; a repeated key; `--insert-only` with `--update-only`; a `--busy-timeout` that is not positive. Success prints nothing.
+
+The record key is the `record_key` of the canonical form of the key values (§7), so `replicate=01` and `replicate=1` name the same record. A table is refused with `reserved_table` (exit 2) when it is `tool_runs`, `result_inputs`, `input_signals`, `samples`, `files`, `facts` or `study_meta`, ends in `_history` or starts with `sqlite_`, compared without regard to case. Slice 1 has no `--sample`, `--input`, `--batch`, `--dry-run`, `--step`, `--quiet` or `--debug`; they arrive in later slices.
+
 `--sample S` resolves through Colligo's `samples` table and adds the key `sample=<id>`. `--insert-only`, `--update-only`, `--dry-run`, `--progress`.
 
 In `--batch`, the special columns `_sample` and `_input` (a `;`-separated list) play the role of the flags per line.
