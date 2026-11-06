@@ -171,13 +171,6 @@ func boolToInt(b bool) int {
 	return 0
 }
 
-func sameValue(a, b db.Value) bool {
-	if a.IsNull || b.IsNull {
-		return a.IsNull == b.IsNull
-	}
-	return a.Raw == b.Raw
-}
-
 func (t *Tx) Upsert(ctx context.Context, table string, key db.Key, values db.Values, mode db.WriteMode) ([]db.FieldChange, error) {
 	changes, err := t.upsert(ctx, table, key, values, mode)
 	return changes, translate(err)
@@ -246,7 +239,7 @@ func (t *Tx) upsert(ctx context.Context, table string, key db.Key, values db.Val
 		if found {
 			oldValue = before[name]
 		}
-		if sameValue(oldValue, after[name]) {
+		if oldValue.Equal(after[name]) {
 			continue
 		}
 		changes = append(changes, db.FieldChange{Field: name, OldValue: oldValue, NewValue: after[name]})
@@ -311,20 +304,59 @@ func (t *Tx) insert(ctx context.Context, table string, byName map[string]db.Colu
 	return err
 }
 
+func (t *Tx) ProjectedRow(ctx context.Context, table string, recordKey string) (db.Row, error) {
+	rows, err := t.tx.QueryContext(ctx, fmt.Sprintf(`SELECT field, new_value, new_is_null FROM (
+		SELECT field, new_value, new_is_null,
+		       ROW_NUMBER() OVER (PARTITION BY field ORDER BY changed_at DESC, id DESC) AS rn
+		FROM %s WHERE record_key = ?
+	) WHERE rn = 1`, quoteIdent(historyTableName(table))), recordKey)
+	if err != nil {
+		return nil, translate(err)
+	}
+	defer rows.Close()
+
+	projected := db.Row{}
+	for rows.Next() {
+		var field string
+		var value sql.NullString
+		var isNull int
+		if err := rows.Scan(&field, &value, &isNull); err != nil {
+			return nil, translate(err)
+		}
+		projected[field] = db.Value{Raw: value.String, IsNull: isNull == 1}
+	}
+	return projected, translate(rows.Err())
+}
+
 func (t *Tx) AppendHistory(ctx context.Context, table string, recordKey string, changes []db.FieldChange, runID int64, at time.Time, source db.HistorySource) error {
 	sourceName := "scribo"
 	if source == db.SourceReconciled {
 		sourceName = "reconciled"
 	}
+	if len(changes) == 0 {
+		return nil
+	}
+	history := quoteIdent(historyTableName(table))
+	changedAt := timestamp(at)
+	var latest sql.NullString
+	err := t.tx.QueryRowContext(ctx,
+		fmt.Sprintf("SELECT max(changed_at) FROM %s WHERE record_key = ?", history), recordKey).Scan(&latest)
+	if err != nil {
+		return translate(err)
+	}
+	if latest.Valid && latest.String > changedAt {
+		changedAt = latest.String
+	}
+
 	statement := fmt.Sprintf(
 		`INSERT INTO %s (run_id, record_key, field, old_value, old_is_null, new_value, new_is_null, source, changed_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, quoteIdent(historyTableName(table)))
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, history)
 	for _, change := range changes {
 		_, err := t.tx.ExecContext(ctx, statement,
 			runID, recordKey, change.Field,
 			nullableValue(change.OldValue), boolToInt(change.OldValue.IsNull),
 			nullableValue(change.NewValue), boolToInt(change.NewValue.IsNull),
-			sourceName, timestamp(at))
+			sourceName, changedAt)
 		if err != nil {
 			return translate(err)
 		}

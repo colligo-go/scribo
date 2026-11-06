@@ -96,6 +96,8 @@ type Backend interface {
     InvalidatedNodes(ctx context.Context) ([]Node, error)
     Edges(ctx context.Context) ([]Edge, error)
     HistoryBetween(ctx context.Context, table string, runA, runB int64) ([]HistoryRow, error)
+    HistoryOf(ctx context.Context, table, recordKey, field string) ([]HistoryRow, error)
+    RecordExists(ctx context.Context, table string, key Key) (bool, error)
 
     BeginTx(ctx context.Context) (Tx, error)
 }
@@ -113,6 +115,8 @@ type Tx interface {
 ```
 
 `SelectRow` returns `false` when no record matches the key and an `ambiguous_key` error (exit 3) when two or more do: the key columns must be `UNIQUE`. It matches with `IS`, so a NULL key value matches a NULL, and it reads every column as `+"column"`: the unary plus gives the expression no declared type, so the driver does not turn the text of a `DATE`, `DATETIME` or `TIMESTAMP` column into a `time.Time` that would no longer read back as the same text. `Upsert` reads the record, writes with `INSERT` or `UPDATE`, reads it again and reports the fields whose stored text differs, ordered by field name; a record that did not exist has a NULL old value for every field. `Rollback` after `Commit` returns nil so that `defer tx.Rollback()` is safe.
+
+`HistoryOf` and `RecordExists` serve `log` and never feed the history: they read outside any transaction. `HistoryOf` on a table without `{table}_history` returns no rows and creates nothing.
 
 While a `Tx` is open, every method of the `Backend` returns an `internal` error, because the pool holds one connection and the call would otherwise wait for ever. Every identifier that comes from the user is quoted with `quoteIdent` (double quotes, an embedded quote doubled); values always go as `?` parameters.
 
@@ -227,6 +231,16 @@ type Edge struct {
     To   string
 }
 
+type HistoryRow struct {
+    ID        int64
+    RunID     int64
+    Field     string
+    Source    string
+    ChangedAt string
+    Old       Value
+    New       Value
+}
+
 type Row  map[string]Value
 type Rows []Row
 ```
@@ -277,6 +291,8 @@ CREATE INDEX IF NOT EXISTS idx_{table}_history_run    ON {table}_history(run_id)
 The data table is never created nor altered.
 
 `old_is_null` and `new_is_null` separate NULL from empty text without depending on a magic value.
+
+`changed_at` never goes back within a record. The order of the history is `(changed_at, id)` and `changed_at` comes from the clock of whoever writes: two cluster nodes with clocks apart, or an NTP step backwards, would give a later write an earlier `changed_at`, and the projection (§6) would pick the wrong value. Before appending, `AppendHistory` reads `max(changed_at)` of the record (through `idx_{table}_history_record`) and writes the later of that and its own time; the fixed format makes string order the order of time, and on a tie `id` decides. The rule is per record: other records keep their own clock.
 
 Key fields never get a history row: they are in the `record_key`. The first row of a record that did not exist has `old_value` NULL and `old_is_null = 1`: the record was not there. A field written as NULL on a record that did not exist changes nothing (NULL to NULL) and so has no row. An existing `{table}_history` is checked against this DDL before anything is created and a different schema is `contract_mismatch`, naming SPEC §4; the data table is never touched.
 
@@ -346,8 +362,19 @@ An error before 10 writes nothing. An error from 11 on leaves the data table, it
 - Equal field → nothing.
 - Divergent field → a `source='reconciled'` row with `old_value` from the projected and `new_value` from the current, `changed_at` of the detection. Warning on stderr.
 - Field with no history at all → a record prior to Scribo's adoption. Ignored.
+- Field whose column no longer exists in the data table (dropped with `ALTER TABLE`) → outside reconciliation. Its history stays as it is; there is no current value to compare, and refusing the write would lock the record for good.
 
-A `log --at` that crosses `reconciled` warns that the state before that point is approximate. History is never deleted nor rewritten.
+- Record deleted from outside (no row for the key) → a `reconciled` row per field with history, `new_value` NULL, unless the projected value is already NULL.
+
+`ProjectedRow` takes, per field, the `new_value` of the last history row of the record in `(changed_at, id)` order, with `ROW_NUMBER() OVER (PARTITION BY field ORDER BY changed_at DESC, id DESC)`. Values are compared in the stored, rendered form (§7): `94.30` written from outside over `94.3` in a `REAL` column is no change.
+
+Reconciliation runs inside the transaction of the write, after `BeginTx` and before `Upsert`, and its rows carry the same `run_id` and the same `changed_at` as the write's own rows. They are appended first and so get the lower ids: the chain `old → new` of every field stays continuous, a `reconciled` row followed by the `scribo` row that starts from its `new_value`.
+
+The warning goes to stderr only after the commit, with code `history_reconciled`, and names the table, the fields and the `record_key`, never a value: `rnaseq_qc: 2 fields changed outside Scribo: Mapped_Reads, note; history reconciled`, or `rnaseq_qc: record deleted outside Scribo; history reconciled`.
+
+Known limit: if the write fails after the reconciliation, the rollback also undoes the `reconciled` rows. The gap is still there and the next successful write to the record detects it again; until then, nothing records that it was seen.
+
+A `log --at` that crosses `reconciled` warns that the state before that point is approximate. Precisely: the state at a moment is, per field, the `new_value` of the last row with `changed_at <= at`, and a field is approximate when its first row after `at` is `reconciled`, because the change made outside Scribo happened at some unknown moment between the last row Scribo knew and the detection. The warning is `history_approximate`, one per field, on stderr. History is never deleted nor rewritten.
 
 ---
 
@@ -368,7 +395,7 @@ There is no magic value: a typed `null` is text. A real NULL only through `--nul
 - A numeric column is one with `INTEGER` or `REAL` affinity, or a `NUMERIC` column declared as `NUMERIC` or `DECIMAL`. `DATE`, `DATETIME`, `TIMESTAMP`, `BOOLEAN` and every other type that is `NUMERIC` only by elimination in SQLite's affinity rules are text: a date in text must never become `invalid_value` for not being a number.
 - The affinity of a declared type follows the order of SQLite's own rules (`sqlite.org/datatype3.html` §3.1): contains `INT` → `INTEGER`; `CHAR`, `CLOB` or `TEXT` → `TEXT`; `BLOB` or no type → `BLOB`; `REAL`, `FLOA` or `DOUB` → `REAL`; otherwise `NUMERIC`. `ANY`, the flexible type of a `STRICT` table, is `BLOB`.
 - The accepted literal is `[+-]?(digits[.digits*]|.digits)([eE][+-]?digits)?`, checked by a regular expression before `strconv` sees the text. `strconv.ParseFloat` alone would accept `NaN`, `Inf`, `0x1A` and `1_000`; those, a leading or trailing space and the empty text are `invalid_value`. An `INTEGER` column takes only `[+-]?digits` that fit in 64 bits, so `94.3`, `1e3` and an overflow are refused. `REAL` and `NUMERIC` bind an integer text as an integer and any other as a float.
-- What is compared and written to the history is the canonical text of the stored value, not what the user typed: `94.30` over `94.3` in a `REAL` column is no change, and `01` and `1` in an `INTEGER` key are the same record. Integers render in base 10 and floats as the shortest text that reads back as the same number.
+- What is compared and written to the history is the canonical text of the stored value, not what the user typed: `94.30` over `94.3` in a `REAL` column is no change, and `01` and `1` in an `INTEGER` key are the same record. Integers render in base 10 and floats as the shortest text that reads back as the same number. Negative zero renders as `0`: SQLite compares it equal to zero, and `-0` read back as an integer would give one record two keys. The canonical form is stable — canonicalizing it again gives the same text — and `FuzzCanonicalIsStable` checks that for every column kind.
 
 **Comparison.** `>`, `<`, `>=`, `<=` against a column with `Declared=false` or textual affinity → `untyped_comparison`, exit 2, suggesting `--force-text`.
 
@@ -476,8 +503,14 @@ In `--batch`, the special columns `_sample` and `_input` (a `;`-separated list) 
 ### log
 
 ```
-scribo log --db DB --table T --key K=V... [--field F] [--at TIMESTAMP]
+scribo log --db DB --table T --key K=V... [--field F] [--at TIMESTAMP] [--format tsv|json]
 ```
+
+Without `--at`, one line per history row in `(changed_at, id)` order. TSV (the default) has the header `changed_at  run_id  source  field  old_value  old_is_null  new_value  new_is_null`; a NULL is an empty cell with `is_null` 1; every value escapes `\` as `\\`, tab as `\t`, LF as `\n` and CR as `\r`. JSON is one object per line, `{"changed_at":…,"run_id":N,"source":…,"field":…,"old":"x"|null,"new":"y"|null}`, without HTML escaping.
+
+With `--at`, the state at that moment: TSV `field  value  is_null`, one line per field in alphabetical order, or a single JSON object with the fields as sorted keys. `TIMESTAMP` is RFC 3339 with a time and a zone, truncated to the millisecond in UTC; a date alone is ambiguous and is a usage error. `--field` limits both forms to one field and must name a column.
+
+A key with no history: `key_not_found` (exit 3) when no record has it, an empty result (header only, exit 0) when the record exists but was never written by Scribo. `log` writes nothing: no `tool_runs` row, no contract or history table created.
 
 ### query, export
 
@@ -575,9 +608,9 @@ ERROR [<typed_code>]: <main message>
 → <context, line of the error, suggestion>
 ```
 
-Typed codes: `table_not_found`, `column_not_found`, `key_not_found`, `key_already_exists`, `invalid_value`, `untyped_comparison`, `unknown_sample`, `input_not_found`, `invalid_rules`, `invariant_violated`, `rule_unavailable`, `colligo_required`, `contract_mismatch`, `stale_results`, `nondeterministic_change`, `file_not_found`, `invalid_format`, `batch_failed`, `db_busy`, `permission_denied`, `synced_path`, `pragma_ineffective`, `usage`, `internal`, `io_error`, `network_filesystem`, `constraint_failed`, `reserved_table`, `ambiguous_key`.
+Typed codes: `table_not_found`, `column_not_found`, `key_not_found`, `key_already_exists`, `invalid_value`, `untyped_comparison`, `unknown_sample`, `input_not_found`, `invalid_rules`, `invariant_violated`, `rule_unavailable`, `colligo_required`, `contract_mismatch`, `stale_results`, `nondeterministic_change`, `file_not_found`, `invalid_format`, `batch_failed`, `db_busy`, `permission_denied`, `synced_path`, `pragma_ineffective`, `usage`, `internal`, `io_error`, `network_filesystem`, `constraint_failed`, `reserved_table`, `ambiguous_key`, `history_reconciled`, `history_approximate`.
 
-New in Slice 1: `constraint_failed` (the database refused a value: NOT NULL, UNIQUE, CHECK or a trigger; exit 3), `reserved_table` (the table is one Scribo or Colligo owns, or a `_history` or `sqlite_` table; exit 2), `ambiguous_key` (a key matches more than one record because its columns are not UNIQUE; exit 3), `io_error` (a database error with no more specific code, exit 5) and `network_filesystem`, which is a warning, never an error.
+New in Slice 1: `constraint_failed` (the database refused a value: NOT NULL, UNIQUE, CHECK or a trigger; exit 3), `reserved_table` (the table is one Scribo or Colligo owns, or a `_history` or `sqlite_` table; exit 2), `ambiguous_key` (a key matches more than one record because its columns are not UNIQUE; exit 3), `io_error` (a database error with no more specific code, exit 5) and the warnings `network_filesystem`, `history_reconciled` and `history_approximate` (§6), which never change the exit status.
 
 Warnings use the same shape with a different prefix, and do not change the exit status:
 
@@ -586,7 +619,7 @@ WARNING [<typed_code>]: <main message>
 → <context>
 ```
 
-Only the CLI parser produces `usage`: an unknown flag or command or a wrong number of arguments. Every subcommand handler returns a typed error; one that escapes untyped becomes `internal`, exit 5, and is a bug to report, never a usage error.
+`usage` comes from the CLI layer only: the parser (an unknown flag or command, a wrong number of arguments) and the flag checks of each subcommand handler before anything is opened. Below the CLI layer, every error is typed; one that escapes untyped becomes `internal`, exit 5, and is a bug to report, never a usage error.
 
 ---
 

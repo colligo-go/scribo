@@ -10,7 +10,9 @@ import (
 // Render turns a value read from the database into the text form Scribo
 // stores in the history and compares. nil is a real NULL; integers use base
 // 10; floats use the shortest text that reads back as the same number, so
-// 3.0 renders as "3" and 94.3 as "94.3". Any other type is a bug.
+// 3.0 renders as "3" and 94.3 as "94.3". Negative zero renders as "0": it
+// compares equal to zero in SQLite, and "-0" would read back as the integer
+// 0, giving one record two keys. Any other type is a bug.
 func Render(x any) (Value, error) {
 	switch v := x.(type) {
 	case nil:
@@ -18,6 +20,9 @@ func Render(x any) (Value, error) {
 	case int64:
 		return Value{Raw: strconv.FormatInt(v, 10)}, nil
 	case float64:
+		if v == 0 {
+			v = 0
+		}
 		return Value{Raw: strconv.FormatFloat(v, 'g', -1, 64)}, nil
 	case string:
 		return Value{Raw: v}, nil

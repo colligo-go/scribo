@@ -1,4 +1,4 @@
-package writer
+package validate
 
 import (
 	"fmt"
@@ -11,7 +11,7 @@ const (
 	maxListedColumns      = 20
 )
 
-func suggestion(name string, columns []string) string {
+func Suggestion(name string, columns []string) string {
 	sorted := append([]string(nil), columns...)
 	sort.Strings(sorted)
 

@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/colligo-go/scribo/internal/db"
 	"github.com/colligo-go/scribo/internal/db/sqlite"
@@ -61,49 +60,23 @@ be UNIQUE. Nothing is printed on success.`,
 	return command
 }
 
-func usage(format string, args ...any) *exitcode.Error {
-	return exitcode.New(exitcode.Usage, exitcode.CodeUsage,
-		fmt.Sprintf(format, args...), "run 'scribo upsert --help' for usage")
-}
-
-func splitAssignment(text string) (string, string, bool) {
-	return strings.Cut(text, "=")
-}
-
 func parseUpsert(options *globalOptions, keys, nulls, args []string, insertOnly, updateOnly bool) (writer.Request, error) {
-	if options.db == "" {
-		return writer.Request{}, usage("--db is required")
+	if err := requireGlobals(options, "upsert"); err != nil {
+		return writer.Request{}, err
 	}
-	if options.table == "" {
-		return writer.Request{}, usage("--table is required")
-	}
-	if options.busyTimeout <= 0 {
-		return writer.Request{}, usage("--busy-timeout must be greater than zero")
-	}
-
-	key := db.Key{}
-	for _, text := range keys {
-		name, value, ok := splitAssignment(text)
-		if !ok || name == "" {
-			return writer.Request{}, usage("--key %q must be FIELD=VALUE", text)
-		}
-		if _, repeated := key[name]; repeated {
-			return writer.Request{}, usage("key field %q is given twice", name)
-		}
-		key[name] = db.Value{Raw: value}
-	}
-	if len(key) == 0 {
-		return writer.Request{}, usage("--key is required")
+	key, err := parseKeys(keys, "upsert")
+	if err != nil {
+		return writer.Request{}, err
 	}
 
 	values := db.Values{}
 	for _, text := range args {
 		name, value, ok := splitAssignment(text)
 		if !ok {
-			return writer.Request{}, usage("%q must be FIELD=VALUE", text)
+			return writer.Request{}, usageFor("upsert", "%q must be FIELD=VALUE", text)
 		}
 		if name == "" {
-			return writer.Request{}, usage("%q has an empty field name", text)
+			return writer.Request{}, usageFor("upsert", "%q has an empty field name", text)
 		}
 		if err := addField(values, key, name, db.Value{Raw: value}); err != nil {
 			return writer.Request{}, err
@@ -111,14 +84,14 @@ func parseUpsert(options *globalOptions, keys, nulls, args []string, insertOnly,
 	}
 	for _, name := range nulls {
 		if name == "" {
-			return writer.Request{}, usage("--null needs a field name")
+			return writer.Request{}, usageFor("upsert", "--null needs a field name")
 		}
 		if err := addField(values, key, name, db.Value{IsNull: true}); err != nil {
 			return writer.Request{}, err
 		}
 	}
 	if len(values) == 0 {
-		return writer.Request{}, usage("nothing to write: give FIELD=VALUE arguments or --null FIELD")
+		return writer.Request{}, usageFor("upsert", "nothing to write: give FIELD=VALUE arguments or --null FIELD")
 	}
 
 	mode := db.ModeUpsert
@@ -140,10 +113,10 @@ func parseUpsert(options *globalOptions, keys, nulls, args []string, insertOnly,
 
 func addField(values db.Values, key db.Key, name string, value db.Value) error {
 	if _, isKey := key[name]; isKey {
-		return usage("field %q is a key field and cannot also be written", name)
+		return usageFor("upsert", "field %q is a key field and cannot also be written", name)
 	}
 	if _, repeated := values[name]; repeated {
-		return usage("field %q is given more than once", name)
+		return usageFor("upsert", "field %q is given more than once", name)
 	}
 	values[name] = value
 	return nil

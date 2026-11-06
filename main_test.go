@@ -42,6 +42,14 @@ func runTests(m *testing.M) int {
 
 func runScribo(t *testing.T, args ...string) result {
 	t.Helper()
+	got := runScriboNoFatal(args...)
+	if got.ExitCode < 0 {
+		t.Fatalf("running scribo: %s", got.Stderr)
+	}
+	return got
+}
+
+func runScriboNoFatal(args ...string) result {
 	command := exec.Command(binaryPath, args...)
 	var stdout, stderr bytes.Buffer
 	command.Stdout = &stdout
@@ -53,7 +61,7 @@ func runScribo(t *testing.T, args ...string) result {
 	if errors.As(err, &exitErr) {
 		exitCode = exitErr.ExitCode()
 	} else if err != nil {
-		t.Fatalf("running scribo: %v", err)
+		return result{Stderr: err.Error(), ExitCode: -1}
 	}
 	return result{Stdout: stdout.String(), Stderr: stderr.String(), ExitCode: exitCode}
 }

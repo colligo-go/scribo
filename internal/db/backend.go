@@ -26,6 +26,18 @@ type RunMeta struct {
 	ConfigHash  string
 }
 
+// HistoryRow is one row of {table}_history, with the old and new values
+// back in Value form so that NULL and empty text stay apart.
+type HistoryRow struct {
+	ID        int64
+	RunID     int64
+	Field     string
+	Source    string
+	ChangedAt string
+	Old       Value
+	New       Value
+}
+
 // WriteMode says what an upsert may do when the record does or does not exist.
 type WriteMode int
 
@@ -66,6 +78,11 @@ type Tx interface {
 	// is false when there is no such record. Two or more matches are an
 	// ambiguous_key error, never an arbitrary pick.
 	SelectRow(ctx context.Context, table string, key Key, fields []string) (Row, bool, error)
+
+	// ProjectedRow is the state the history asserts for a record: for each
+	// field with history, the new value of its last row in (changed_at, id)
+	// order. A record with no history gives an empty Row.
+	ProjectedRow(ctx context.Context, table string, recordKey string) (Row, error)
 
 	// Upsert writes values to the record the key names, as mode allows, and
 	// returns the fields whose stored value changed, ordered by field name.
@@ -120,6 +137,17 @@ type Backend interface {
 	// other Backend method returns an internal error: the pool holds one
 	// connection and the call would wait for ever.
 	BeginTx(ctx context.Context) (Tx, error)
+
+	// HistoryOf returns the history rows of one record, or of one field of
+	// it when field is not empty, in (changed_at, id) order. A table that has
+	// no {table}_history yet gives no rows and no error, and nothing is
+	// created.
+	HistoryOf(ctx context.Context, table, recordKey, field string) ([]HistoryRow, error)
+
+	// RecordExists reports whether a record with this key is in the table.
+	// It reads outside any transaction, so its answer must never feed the
+	// history; only Tx.SelectRow does that.
+	RecordExists(ctx context.Context, table string, key Key) (bool, error)
 
 	// BeginRun records the start of an execution in tool_runs and returns
 	// its id. The row is committed at once, so it survives a failed write.
