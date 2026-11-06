@@ -21,6 +21,7 @@ const (
 	CodePragmaIneffective = "pragma_ineffective"
 	CodeIOError           = "io_error"
 	CodeNetworkFilesystem = "network_filesystem"
+	CodeContractMismatch  = "contract_mismatch"
 )
 
 type Error struct {
