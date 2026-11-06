@@ -1,8 +1,8 @@
 # Scribo — Roadmap
 
-> **Current slice: 1 — Vertical: upsert, history, `--at`.** Slice 0 is closed: Scribo exists, as its own binary in its own repository (`DESIGN.md` §2 and §5). Nothing outside Slice 1 should be built yet.
+> **Current slice: 2 — Reading and entry door.** Slices 0 and 1 are closed: Scribo writes values with a per-field history in one transaction, reconciles changes made outside it and reads the history back with `log --at`. Nothing outside Slice 2 should be built yet.
 
-The rule of this document: a thin slice end to end before breadth. There is no code yet: Slice 1 is written from this SPEC.
+The rule of this document: a thin slice end to end before breadth.
 
 ---
 
@@ -20,7 +20,7 @@ Outcome (2026-11-01): the tools tested lacked transitive invalidation, per-value
 
 ---
 
-## Slice 1 — Vertical: upsert, history, `--at` (current)
+## Slice 1 — Vertical: upsert, history, `--at` (closed)
 
 The heart, rewritten per the SPEC.
 
@@ -45,9 +45,11 @@ Definition of done:
 - A database on a simulated network filesystem opens in `DELETE` with a warning.
 - A `tool_runs` created by Colligo is accepted; a `tool_runs` with a divergent schema → `contract_mismatch`.
 
+Outcome (2026-11-06): `upsert` and `log --at` work end to end on SQLite opened per `CONTRACT.md` §2; the six criteria are covered by tests, eight concurrent processes keep an unbroken history chain under `-race`, and changes made outside Scribo become `reconciled` rows.
+
 ---
 
-## Slice 2 — Reading and entry door
+## Slice 2 — Reading and entry door (current)
 
 Scope: `query` and `export` with `--where` and refusal of untyped comparison; TSV, JSONL and CSV formats; `schema --from` and `--from-multiqc`; `ingest multiqc`.
 
