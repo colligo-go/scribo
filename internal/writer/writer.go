@@ -63,7 +63,7 @@ func Upsert(ctx context.Context, backend db.Backend, req Request, warn func(exit
 	if err != nil {
 		return err
 	}
-	writeErr := write(ctx, backend, req, canonicalKey, recordKey, runID, warn)
+	writeErr := write(ctx, backend, req, byName, canonicalKey, recordKey, runID, warn)
 	if writeErr != nil {
 		if endErr := backend.EndRun(ctx, runID, statusOf(writeErr)); endErr != nil {
 			warn(exitcode.Warning{
@@ -76,7 +76,7 @@ func Upsert(ctx context.Context, backend db.Backend, req Request, warn func(exit
 	return backend.EndRun(ctx, runID, exitcode.OK)
 }
 
-func write(ctx context.Context, backend db.Backend, req Request, key db.Key, recordKey string, runID int64, warn func(exitcode.Warning)) error {
+func write(ctx context.Context, backend db.Backend, req Request, columns map[string]db.Column, key db.Key, recordKey string, runID int64, warn func(exitcode.Warning)) error {
 	tx, err := backend.BeginTx(ctx)
 	if err != nil {
 		return err
@@ -84,7 +84,7 @@ func write(ctx context.Context, backend db.Backend, req Request, key db.Key, rec
 	defer tx.Rollback()
 	at := time.Now()
 
-	reconciled, deleted, err := reconcile(ctx, tx, req.Table, key, recordKey, runID, at)
+	reconciled, deleted, err := reconcile(ctx, tx, req.Table, columns, key, recordKey, runID, at)
 	if err != nil {
 		return err
 	}
@@ -107,10 +107,18 @@ func write(ctx context.Context, backend db.Backend, req Request, key db.Key, rec
 	return nil
 }
 
-func reconcile(ctx context.Context, tx db.Tx, table string, key db.Key, recordKey string, runID int64, at time.Time) ([]db.FieldChange, bool, error) {
+func reconcile(ctx context.Context, tx db.Tx, table string, columns map[string]db.Column, key db.Key, recordKey string, runID int64, at time.Time) ([]db.FieldChange, bool, error) {
 	projected, err := tx.ProjectedRow(ctx, table, recordKey)
-	if err != nil || len(projected) == 0 {
+	if err != nil {
 		return nil, false, err
+	}
+	for field := range projected {
+		if _, ok := columns[field]; !ok {
+			delete(projected, field)
+		}
+	}
+	if len(projected) == 0 {
+		return nil, false, nil
 	}
 	fields := make([]string, 0, len(projected))
 	for field := range projected {

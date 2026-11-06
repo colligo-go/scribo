@@ -362,6 +362,7 @@ An error before 10 writes nothing. An error from 11 on leaves the data table, it
 - Equal field → nothing.
 - Divergent field → a `source='reconciled'` row with `old_value` from the projected and `new_value` from the current, `changed_at` of the detection. Warning on stderr.
 - Field with no history at all → a record prior to Scribo's adoption. Ignored.
+- Field whose column no longer exists in the data table (dropped with `ALTER TABLE`) → outside reconciliation. Its history stays as it is; there is no current value to compare, and refusing the write would lock the record for good.
 
 - Record deleted from outside (no row for the key) → a `reconciled` row per field with history, `new_value` NULL, unless the projected value is already NULL.
 
@@ -618,7 +619,7 @@ WARNING [<typed_code>]: <main message>
 → <context>
 ```
 
-Only the CLI parser produces `usage`: an unknown flag or command or a wrong number of arguments. Every subcommand handler returns a typed error; one that escapes untyped becomes `internal`, exit 5, and is a bug to report, never a usage error.
+`usage` comes from the CLI layer only: the parser (an unknown flag or command, a wrong number of arguments) and the flag checks of each subcommand handler before anything is opened. Below the CLI layer, every error is typed; one that escapes untyped becomes `internal`, exit 5, and is a bug to report, never a usage error.
 
 ---
 

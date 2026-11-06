@@ -189,3 +189,22 @@ func TestHistoryChainStaysContinuous(t *testing.T) {
 
 	requireChain(t, path)
 }
+
+func TestReconcileSkipsAColumnDroppedFromTheTable(t *testing.T) {
+	path := seeded(t)
+	before := historyOf(t, path, "note")
+	mustExec(t, path, "ALTER TABLE rnaseq_qc DROP COLUMN note")
+
+	got := upsertS1(t, path, "Mapped_Reads=13")
+
+	if got.ExitCode != 0 || got.Stdout != "" || got.Stderr != "" {
+		t.Fatalf("exit %d, stdout %q, stderr %q: a dropped column must not block the record", got.ExitCode, got.Stdout, got.Stderr)
+	}
+	if after := historyOf(t, path, "note"); fmt.Sprint(after) != fmt.Sprint(before) {
+		t.Errorf("note history changed after the drop: before %v, after %v", before, after)
+	}
+	reads := historyOf(t, path, "Mapped_Reads")
+	if len(reads) != 2 || fmt.Sprint(reads[1][:5]) != "[scribo 12 0 13 0]" {
+		t.Errorf("Mapped_Reads history = %v", reads)
+	}
+}
