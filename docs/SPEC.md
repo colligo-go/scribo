@@ -74,10 +74,11 @@ All persistence goes through here. SQL never lives in the handlers.
 
 ```go
 type Backend interface {
-    Open(ctx context.Context, dsn string, opts OpenOptions) error
+    Open(ctx context.Context, path string, opts OpenOptions) error
     Close() error
 
     JournalMode() string
+    Warnings() []exitcode.Warning
     Classification(ctx context.Context) (string, error)
     ColligoPresent(ctx context.Context) (bool, error)
 
@@ -112,6 +113,8 @@ type Tx interface {
 ```
 
 `Tx` does not embed `Backend`: a nested transaction does not exist in SQLite, and the narrow interface makes that impossible to write. The reads that feed the history — `SelectRow` and `ProjectedRow` — exist **only** on `Tx`, so that it is impossible to read them outside the transaction that writes.
+
+`Open` takes the path of an existing database file, not a DSN: the DSN is built inside the SQLite backend. A `Backend` never writes to stderr; `Warnings()` returns what `Open` found (the network-filesystem notice) and the command layer prints it.
 
 `BeginTx` opens `BEGIN IMMEDIATE` (`_txlock=immediate` in the DSN).
 
@@ -228,6 +231,11 @@ type Rows []Row
 ## 3. Opening
 
 Per `CONTRACT.md` §2: filesystem detection, PRAGMAs in the DSN with `_txlock=immediate`, read-back on each connection, check of the contract tables. `SetMaxOpenConns(1)` for the writing process.
+
+- The database must already exist: `Open` checks the file first (`file_not_found`, exit 4; `permission_denied`, exit 5) and the DSN carries `mode=rw`, so the driver never creates a missing file on its own.
+- The DSN is a `file:` URI built with `net/url`, never by string concatenation, so a path with a space, `#`, `?` or `%` still names the right file. The PRAGMAs go in as the driver's short keys (`_busy_timeout`, `_foreign_keys`, `_journal_mode`, `_synchronous`) next to `_txlock=immediate`; the driver validates all of them before applying any, so a wrong DSN never leaves the database half converted.
+- Read-back is a connection hook registered once for the driver: on every new connection it parses the DSN it was given, runs `PRAGMA <name>` for each of the four keys present and compares. A difference is `pragma_ineffective` (exit 5), for example `PRAGMA journal_mode is memory, expected wal`. A DSN without those keys is not checked.
+- Filesystem detection is `statfs` on the database directory: the Linux magic numbers of `linux/magic.h` and the macOS `f_fstypename`. A network filesystem opens in `DELETE` and produces a `network_filesystem` warning. Linux and macOS are the only targets.
 
 Then:
 
@@ -537,7 +545,16 @@ ERROR [<typed_code>]: <main message>
 → <context, line of the error, suggestion>
 ```
 
-Typed codes: `table_not_found`, `column_not_found`, `key_not_found`, `key_already_exists`, `invalid_value`, `untyped_comparison`, `unknown_sample`, `input_not_found`, `invalid_rules`, `invariant_violated`, `rule_unavailable`, `colligo_required`, `contract_mismatch`, `stale_results`, `nondeterministic_change`, `file_not_found`, `invalid_format`, `batch_failed`, `db_busy`, `permission_denied`, `synced_path`, `pragma_ineffective`, `usage`, `internal`.
+Typed codes: `table_not_found`, `column_not_found`, `key_not_found`, `key_already_exists`, `invalid_value`, `untyped_comparison`, `unknown_sample`, `input_not_found`, `invalid_rules`, `invariant_violated`, `rule_unavailable`, `colligo_required`, `contract_mismatch`, `stale_results`, `nondeterministic_change`, `file_not_found`, `invalid_format`, `batch_failed`, `db_busy`, `permission_denied`, `synced_path`, `pragma_ineffective`, `usage`, `internal`, `io_error`, `network_filesystem`.
+
+New in Slice 1: `io_error` (system error with no more specific code, exit 5) and `network_filesystem`, which is a warning, never an error.
+
+Warnings use the same shape with a different prefix, and do not change the exit status:
+
+```
+WARNING [<typed_code>]: <main message>
+→ <context>
+```
 
 Only the CLI parser produces `usage`: an unknown flag or command or a wrong number of arguments. Every subcommand handler returns a typed error; one that escapes untyped becomes `internal`, exit 5, and is a bug to report, never a usage error.
 

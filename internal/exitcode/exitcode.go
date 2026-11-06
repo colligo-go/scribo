@@ -15,6 +15,12 @@ const (
 	CodeUsage        = "usage"
 	CodeInvalidValue = "invalid_value"
 	CodeInternal     = "internal"
+
+	CodeFileNotFound      = "file_not_found"
+	CodePermissionDenied  = "permission_denied"
+	CodePragmaIneffective = "pragma_ineffective"
+	CodeIOError           = "io_error"
+	CodeNetworkFilesystem = "network_filesystem"
 )
 
 type Error struct {
@@ -36,6 +42,20 @@ func (e *Error) Format() string {
 	text := fmt.Sprintf("ERROR [%s]: %s\n", e.Code, e.Message)
 	if e.Context != "" {
 		text += "→ " + e.Context + "\n"
+	}
+	return text
+}
+
+type Warning struct {
+	Code    string
+	Message string
+	Context string
+}
+
+func (w Warning) Format() string {
+	text := fmt.Sprintf("WARNING [%s]: %s\n", w.Code, w.Message)
+	if w.Context != "" {
+		text += "→ " + w.Context + "\n"
 	}
 	return text
 }
