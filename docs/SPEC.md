@@ -273,6 +273,14 @@ A JSON array of `[name, value]` pairs ordered by field name, without spaces, a N
 
 Injective by construction: different records never produce the same key.
 
+Encoding decisions, so that the canonical form is the obvious one:
+
+- No HTML escaping: `<`, `>` and `&` are written as they are, not as `\u003c`, `\u003e` and `\u0026`. The encoder is `encoding/json` with `SetEscapeHTML(false)`, and the trailing newline it adds is removed.
+- A field name, or a value that is not NULL, with invalid UTF-8 is refused with `invalid_value` (exit 3). `encoding/json` would replace each invalid byte with U+FFFD, and two different values would collapse into one key, breaking injectivity. The `Raw` of a NULL value is ignored.
+- An empty key (no field) is refused with `usage` (exit 1): a record without a key does not exist.
+
+Injectivity is checked by a native fuzz test (`FuzzRecordKey`): every accepted key decodes back to exactly the original, with NULL, `"null"` and `""` kept apart.
+
 ---
 
 ## 5. Flow of a write
