@@ -2,7 +2,7 @@
 
 Declarative document. For the why, see `DESIGN.md`. For everything that is shared with Colligo — database opening, `tool_runs`, `result_inputs`, `input_signals`, invariants and dependency graph —, `CONTRACT.md`, which prevails over this document in case of conflict. Implement from here.
 
-Module: `github.com/<org>/scribo`
+Module: `github.com/colligo-go/scribo`
 Go: latest stable.
 SQLite driver: `modernc.org/sqlite`.
 CLI: `github.com/spf13/cobra`.
@@ -302,6 +302,8 @@ Validation outside the transaction. State and write inside.
 
 Error from 11 on → Rollback, message on stderr, appropriate exit code, `EndRun` with the code.
 
+An error before 10 writes nothing. An error from 11 on leaves the data table, its history, `result_inputs` and `input_signals` as they were, and exactly one new `tool_runs` row with a non-zero `exit_code`: the failed run is recorded, its effects are not. The one exception is the `suspect` signal of a violated invariant (§8), stored on purpose in a transaction of its own.
+
 `--batch` iterates the lines inside the same transaction. An error on any line → total ROLLBACK, message naming the line.
 
 `--dry-run` executes up to 14 inside a transaction that ends in Rollback and prints the `FieldChange` and the rules evaluated.
@@ -539,7 +541,7 @@ Integration of the complete binary in a subprocess, SQLite in tmpdir.
 
 Mandatory:
 
-- unit and batch atomicity: an error in the middle persists nothing; database byte-identical before and after
+- unit and batch atomicity: an error in the middle persists nothing; data table, history, `result_inputs` and `input_signals` identical before and after, and one new `tool_runs` row with a non-zero `exit_code`
 - concurrency: N processes writing the same record; every `old_value` of the history equal to the value immediately before in the order `(changed_at, id)`; `-race`
 - history and `record_key`: the key is independent of the order of the flags; values with `,`, `=`, `"` and `[` do not collide
 - NULL: `FIELD=null` stores text; `--null FIELD` stores NULL; the history distinguishes the two

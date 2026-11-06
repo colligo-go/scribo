@@ -85,7 +85,7 @@ Criterion:
 
 Scope: `--batch` with total atomicity, stdin, `_sample` and `_input` columns, `--empty-as-null`, `--progress`; restricted-database regime; exhaustive `--help` with examples; README with a real Colligo → nf-core → Scribo pipeline; GoReleaser Linux and macOS on amd64 and arm64; CI with `-race`, `vet`, lint and comparison of `CONTRACT.md` with Colligo's copy.
 
-Criterion: a batch of 1000 lines with an error on line 500 leaves the database identical; `--debug` refused on a restricted database.
+Criterion: a batch of 1000 lines with an error on line 500 leaves the data table and its history identical, with the failed run recorded in `tool_runs`; `--debug` refused on a restricted database.
 
 ---
 
