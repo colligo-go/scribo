@@ -3,7 +3,7 @@
 Declarative document. For the why, see `DESIGN.md`. For everything that is shared with Colligo — database opening, `tool_runs`, `result_inputs`, `input_signals`, invariants and dependency graph —, `CONTRACT.md`, which prevails over this document in case of conflict. Implement from here.
 
 Module: `github.com/colligo-go/scribo`
-Go: latest stable.
+Go: the same version as Colligo, set by the `go` directive of `go.mod` (today 1.26.3), which CI uses through `go-version-file`. Raised in both repositories together, and always a release the Go team still supports.
 SQLite driver: `modernc.org/sqlite`.
 CLI: `github.com/spf13/cobra`.
 
