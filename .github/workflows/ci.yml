@@ -41,6 +41,9 @@ jobs:
       - name: Test
         run: go test -race -count=2 ./...
 
+      - name: Fuzz record_key
+        run: go test -run='^$' -fuzz=FuzzRecordKey -fuzztime=30s ./internal/history
+
       - name: Secrets in history
         run: |
           go install github.com/zricethezav/gitleaks/v8@v8.30.1

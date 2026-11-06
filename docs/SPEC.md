@@ -273,6 +273,18 @@ A JSON array of `[name, value]` pairs ordered by field name, without spaces, a N
 
 Injective by construction: different records never produce the same key.
 
+Encoding decisions, so that the canonical form is the obvious one:
+
+- No HTML escaping: `<`, `>` and `&` are written as they are, not as `\u003c`, `\u003e` and `\u0026`. The encoder is `encoding/json` with `SetEscapeHTML(false)`, and the trailing newline it adds is removed.
+- Field names are sorted by their UTF-8 bytes, which is the same as Unicode code point order and never depends on locale: `B` sorts before `a`.
+- Escaping inside a string, and nothing else: `"` → `\"`, `\` → `\\`, `\b` `\f` `\n` `\r` `\t` → their short forms, any other byte below `0x20` → `\u00XX` with lowercase hex, U+2028 and U+2029 → `\u2028` and `\u2029`. Every other character, DEL (`0x7f`), `/` and all non-ASCII text included, is written as raw UTF-8.
+- A field name, or a value that is not NULL, with invalid UTF-8 is refused with `invalid_value` (exit 3). `encoding/json` would replace each invalid byte with U+FFFD, and two different values would collapse into one key, breaking injectivity. The `Raw` of a NULL value is ignored.
+- An empty key (no field) is refused with `usage` (exit 1): a record without a key does not exist.
+
+These rules are part of the canonical form, not a detail of the encoder: `record_key` is stored for good in `{table}_history` and `result_inputs`, and a different spelling of the same record would split its history in silence. `encoding/json` has changed its escaping before (Go 1.22 moved `\b` and `\f` from `\u0008` and `\u000c` to the short forms), so `TestRecordKeyEscapingIsPinned` fixes every rule above byte for byte; a Go release that changes one fails CI, and the answer is an encoder of our own, never a new spelling.
+
+Injectivity is checked by a native fuzz test (`FuzzRecordKey`): every accepted key decodes back to exactly the original, with NULL, `"null"` and `""` kept apart.
+
 ---
 
 ## 5. Flow of a write
