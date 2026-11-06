@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"os"
 
@@ -18,11 +17,6 @@ func run() int {
 	if err == nil {
 		return exitcode.OK
 	}
-	var domain *exitcode.Error
-	if errors.As(err, &domain) {
-		fmt.Fprint(os.Stderr, domain.Format())
-		return domain.Status
-	}
-	fmt.Fprintf(os.Stderr, "ERROR [%s]: %s\n", exitcode.CodeUsage, err)
-	return exitcode.Usage
+	fmt.Fprint(os.Stderr, err.Format())
+	return err.Status
 }

@@ -2,17 +2,24 @@ package cmd
 
 import (
 	"errors"
+	"os"
 
 	"github.com/colligo-go/scribo/internal/exitcode"
 	"github.com/spf13/cobra"
 )
 
+type handler func(*cobra.Command, []string) error
+
 func newRootCommand() *cobra.Command {
 	root := &cobra.Command{
 		Use:           "scribo",
 		Short:         "Ledger of pipeline results: values per sample, with provenance and staleness",
+		Args:          cobra.NoArgs,
 		SilenceErrors: true,
 		SilenceUsage:  true,
+		RunE: func(command *cobra.Command, _ []string) error {
+			return command.Help()
+		},
 	}
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
 		return usageError(err)
@@ -20,18 +27,47 @@ func newRootCommand() *cobra.Command {
 	return root
 }
 
-func usageError(err error) *exitcode.Error {
-	return exitcode.New(exitcode.Usage, exitcode.CodeUsage, err.Error(), "run 'scribo --help' for usage")
+func Execute() *exitcode.Error {
+	return execute(newRootCommand(), os.Args[1:])
 }
 
-func Execute() error {
-	err := newRootCommand().Execute()
+func execute(root *cobra.Command, args []string) *exitcode.Error {
+	typeHandlerErrors(root)
+	root.SetArgs(args)
+	err := root.Execute()
 	if err == nil {
 		return nil
 	}
 	var domain *exitcode.Error
 	if errors.As(err, &domain) {
-		return err
+		return domain
 	}
 	return usageError(err)
+}
+
+func typeHandlerErrors(command *cobra.Command) {
+	if command.RunE != nil {
+		command.RunE = typed(command.RunE)
+	}
+	for _, child := range command.Commands() {
+		typeHandlerErrors(child)
+	}
+}
+
+func typed(run handler) handler {
+	return func(command *cobra.Command, args []string) error {
+		err := run(command, args)
+		if err == nil {
+			return nil
+		}
+		var domain *exitcode.Error
+		if errors.As(err, &domain) {
+			return domain
+		}
+		return exitcode.New(exitcode.System, exitcode.CodeInternal, err.Error(), "an error Scribo did not classify: this is a bug, please report it")
+	}
+}
+
+func usageError(err error) *exitcode.Error {
+	return exitcode.New(exitcode.Usage, exitcode.CodeUsage, err.Error(), "run 'scribo --help' for usage")
 }
