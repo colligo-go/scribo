@@ -47,6 +47,9 @@ jobs:
       - name: Fuzz record_key
         run: go test -run='^$' -fuzz=FuzzRecordKey -fuzztime=30s ./internal/history
 
+      - name: Fuzz the canonical form
+        run: go test -run='^$' -fuzz=FuzzCanonicalIsStable -fuzztime=30s ./internal/db
+
       - name: Secrets in history
         run: |
           go install github.com/zricethezav/gitleaks/v8@v8.30.1
