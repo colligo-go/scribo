@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -79,6 +80,67 @@ func TestEnsureContractTablesIsIdempotent(t *testing.T) {
 		if err := backend.EnsureContractTables(context.Background()); err != nil {
 			t.Fatalf("call %d: %v", i+1, err)
 		}
+	}
+}
+
+func colligoRows(t *testing.T, handle *sql.DB) string {
+	t.Helper()
+	rows, err := handle.Query("SELECT * FROM tool_runs WHERE tool = 'colligo' ORDER BY id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	columns, err := rows.Columns()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out strings.Builder
+	for rows.Next() {
+		values := make([]any, len(columns))
+		pointers := make([]any, len(columns))
+		for i := range values {
+			pointers[i] = &values[i]
+		}
+		if err := rows.Scan(pointers...); err != nil {
+			t.Fatal(err)
+		}
+		fmt.Fprintf(&out, "%v\n", values)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return out.String()
+}
+
+func TestColligoToolRunsIsAcceptedAndUntouched(t *testing.T) {
+	path, handle := rawDatabase(t)
+	if _, err := handle.Exec(contract.ToolRunsDDL); err != nil {
+		t.Fatal(err)
+	}
+	_, err := handle.Exec(`INSERT INTO tool_runs
+		(contract_version, tool, tool_version, git_sha, go_version, host, step, config_hash, argv_shape, started_at, ended_at, exit_code)
+		VALUES (1, 'colligo', 'v0.3.0', 'abc123', 'go1.26.3', 'node1', NULL, 'cfg', '{"command":"colligo add"}', '2026-11-06T10:00:00.000Z', '2026-11-06T10:00:01.000Z', 0)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := colligoRows(t, handle)
+	handle.Close()
+
+	backend := openBackend(t, path, localFS, db.OpenOptions{})
+	ctx := context.Background()
+	if err := backend.EnsureContractTables(ctx); err != nil {
+		t.Fatal(err)
+	}
+	runID, err := backend.BeginRun(ctx, db.RunMeta{ToolVersion: "v", GitSHA: "g", GoVersion: "go", ArgvShape: "{}"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := backend.EndRun(ctx, runID, 0); err != nil {
+		t.Fatal(err)
+	}
+
+	if after := colligoRows(t, backend.db); after != before {
+		t.Errorf("Colligo's row changed:\nbefore %safter  %s", before, after)
 	}
 }
 
