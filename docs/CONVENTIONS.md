@@ -60,7 +60,7 @@ House style. Inviolable during implementation. Short on purpose.
 
 **`--help` is the primary documentation.** Each subcommand has a `--help` sufficient for use without outside consultation, with concrete examples.
 
-**Exit codes are contractual.** The set of SPEC §10 is stable. Adding one means thinking twice and updating the doc.
+**Exit codes are contractual.** The set of SPEC §12 is stable. Adding one means thinking twice and updating the doc.
 
 **Fail closed where ambiguity produces a wrong number.** A numeric comparison against a column without a declared type is an error, not a warning.
 

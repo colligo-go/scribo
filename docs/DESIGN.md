@@ -90,7 +90,7 @@ The shell removes quotes before the program sees the argument: `FIELD="null"` an
 
 ### Provenance per value
 
-`upsert --input file` stores edges in `result_inputs`: the record, or the field, depends on that file's BLAKE3 root. If the file is under Colligo's custody, the root comes from `files`; if not, Scribo computes it with the common core's fact extractor, in the same single read. No value needs provenance, but whoever declares it gains invalidation and invariants.
+`upsert --input file` stores edges in `result_inputs`: the record, or the field, depends on that file's BLAKE3 root. If the file is under Colligo's custody, the root comes from `files`; if not, Scribo computes it itself, in a single read. The root is the BLAKE3 hash of the whole file, the same value Colligo stores, so the two match without sharing code; a test compares Scribo's root with one written by Colligo. No value needs provenance, but whoever declares it gains invalidation and invariants.
 
 ### Staleness is reachability
 
