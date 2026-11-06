@@ -14,6 +14,9 @@ type querier interface {
 }
 
 func (b *Backend) Columns(ctx context.Context, table string) ([]db.Column, error) {
+	if err := b.guard(); err != nil {
+		return nil, err
+	}
 	columns, err := readColumns(ctx, b.db, table)
 	return columns, translate(err)
 }

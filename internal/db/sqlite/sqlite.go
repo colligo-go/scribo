@@ -21,6 +21,7 @@ type Backend struct {
 	journalMode string
 	warnings    []exitcode.Warning
 	detect      func(string) (FSInfo, error)
+	txOpen      bool
 }
 
 func New() *Backend {
@@ -79,7 +80,7 @@ func (b *Backend) Open(ctx context.Context, path string, opts db.OpenOptions) er
 	}
 	b.db = handle
 
-	if err := b.checkTable(ctx, "tool_runs", contract.ToolRunsDDL); err != nil {
+	if err := b.checkTable(ctx, "tool_runs", contract.ToolRunsDDL, "CONTRACT.md"); err != nil {
 		b.Close()
 		return translate(err)
 	}
@@ -104,9 +105,24 @@ func (b *Backend) Warnings() []exitcode.Warning {
 }
 
 func (b *Backend) TableExists(ctx context.Context, table string) (bool, error) {
+	if err := b.guard(); err != nil {
+		return false, err
+	}
+	return b.tableExists(ctx, b.db, table)
+}
+
+func (b *Backend) guard() error {
+	if b.txOpen {
+		return exitcode.New(exitcode.System, exitcode.CodeInternal,
+			"backend used while a transaction is open", "")
+	}
+	return nil
+}
+
+func (b *Backend) tableExists(ctx context.Context, q querier, table string) (bool, error) {
 	var found int
-	err := b.db.QueryRowContext(ctx,
-		"SELECT 1 FROM sqlite_schema WHERE type='table' AND name=?", table).Scan(&found)
+	err := q.QueryRowContext(ctx,
+		"SELECT 1 FROM sqlite_schema WHERE type='table' AND name = ? COLLATE NOCASE", table).Scan(&found)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}

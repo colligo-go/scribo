@@ -34,6 +34,9 @@ type tableShape struct {
 }
 
 func (b *Backend) EnsureContractTables(ctx context.Context) error {
+	if err := b.guard(); err != nil {
+		return err
+	}
 	err := b.inTx(ctx, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, contract.ToolRunsDDL)
 		return err
@@ -41,10 +44,10 @@ func (b *Backend) EnsureContractTables(ctx context.Context) error {
 	if err != nil {
 		return translate(err)
 	}
-	return translate(b.checkTable(ctx, "tool_runs", contract.ToolRunsDDL))
+	return translate(b.checkTable(ctx, "tool_runs", contract.ToolRunsDDL, "CONTRACT.md"))
 }
 
-func (b *Backend) checkTable(ctx context.Context, table, ddl string) error {
+func (b *Backend) checkTable(ctx context.Context, table, ddl, document string) error {
 	exists, err := b.TableExists(ctx, table)
 	if err != nil {
 		return err
@@ -73,7 +76,7 @@ func (b *Backend) checkTable(ctx context.Context, table, ddl string) error {
 	}
 	if difference := firstDifference(actual, expected); difference != "" {
 		return exitcode.New(exitcode.Database, exitcode.CodeContractMismatch,
-			fmt.Sprintf("%s differs from CONTRACT.md: %s", table, difference),
+			fmt.Sprintf("%s differs from %s: %s", table, document, difference),
 			"the database was created by an incompatible tool or version")
 	}
 	return nil

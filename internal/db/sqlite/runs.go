@@ -11,8 +11,12 @@ import (
 	"github.com/colligo-go/scribo/internal/exitcode"
 )
 
+func timestamp(at time.Time) string {
+	return at.UTC().Format("2006-01-02T15:04:05.000Z")
+}
+
 var now = func() string {
-	return time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
+	return timestamp(time.Now())
 }
 
 func nullable(text string) sql.NullString {
@@ -20,6 +24,9 @@ func nullable(text string) sql.NullString {
 }
 
 func (b *Backend) BeginRun(ctx context.Context, meta db.RunMeta) (int64, error) {
+	if err := b.guard(); err != nil {
+		return 0, err
+	}
 	var runID int64
 	err := b.inTx(ctx, func(tx *sql.Tx) error {
 		result, err := tx.ExecContext(ctx,
@@ -39,6 +46,9 @@ func (b *Backend) BeginRun(ctx context.Context, meta db.RunMeta) (int64, error) 
 }
 
 func (b *Backend) EndRun(ctx context.Context, runID int64, exitCode int) error {
+	if err := b.guard(); err != nil {
+		return err
+	}
 	return translate(b.inTx(ctx, func(tx *sql.Tx) error {
 		result, err := tx.ExecContext(ctx,
 			`UPDATE tool_runs SET ended_at = ?, exit_code = ?

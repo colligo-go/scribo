@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"time"
 
 	"github.com/colligo-go/scribo/internal/exitcode"
 )
@@ -23,6 +24,62 @@ type RunMeta struct {
 	Step        string
 	Host        string
 	ConfigHash  string
+}
+
+// WriteMode says what an upsert may do when the record does or does not exist.
+type WriteMode int
+
+const (
+	// ModeUpsert inserts a new record or updates an existing one.
+	ModeUpsert WriteMode = iota
+	// ModeInsertOnly refuses to touch an existing record.
+	ModeInsertOnly
+	// ModeUpdateOnly refuses to create a missing record.
+	ModeUpdateOnly
+)
+
+// HistorySource says who wrote a history row: Scribo itself, or the
+// reconciliation that found a change made behind its back.
+type HistorySource int
+
+const (
+	SourceScribo HistorySource = iota
+	SourceReconciled
+)
+
+// FieldChange is one field of one record that a write really changed. Both
+// values are the stored form, read back after the write. A new record has a
+// NULL OldValue for every field.
+type FieldChange struct {
+	Field    string
+	OldValue Value
+	NewValue Value
+}
+
+// Tx is one BEGIN IMMEDIATE transaction. It does not embed Backend: SQLite
+// has no nested transactions, and the narrow interface makes a call to the
+// Backend from inside a Tx impossible to write. Reads of the current state
+// exist only here, so that no one can read the state they are about to write
+// outside the transaction that writes it.
+type Tx interface {
+	// SelectRow reads the fields of the record the key names. The boolean
+	// is false when there is no such record. Two or more matches are an
+	// ambiguous_key error, never an arbitrary pick.
+	SelectRow(ctx context.Context, table string, key Key, fields []string) (Row, bool, error)
+
+	// Upsert writes values to the record the key names, as mode allows, and
+	// returns the fields whose stored value changed, ordered by field name.
+	// Key fields never appear in the result.
+	Upsert(ctx context.Context, table string, key Key, values Values, mode WriteMode) ([]FieldChange, error)
+
+	// AppendHistory adds one history row per change under runID.
+	AppendHistory(ctx context.Context, table string, recordKey string, changes []FieldChange, runID int64, at time.Time, source HistorySource) error
+
+	Commit() error
+
+	// Rollback undoes the transaction. It returns nil after a Commit, so
+	// that "defer tx.Rollback()" is safe.
+	Rollback() error
 }
 
 // Backend is the only door to persistence. Handlers never see SQL; they hold
@@ -54,6 +111,15 @@ type Backend interface {
 	// EnsureContractTables creates the contract tables Scribo may create,
 	// with the exact DDL of CONTRACT.md, and checks them against it.
 	EnsureContractTables(ctx context.Context) error
+
+	// EnsureHistoryTable creates {table}_history and its indexes, and checks
+	// an existing one against the DDL of SPEC §4.
+	EnsureHistoryTable(ctx context.Context, table string) error
+
+	// BeginTx opens a BEGIN IMMEDIATE transaction. While it is open every
+	// other Backend method returns an internal error: the pool holds one
+	// connection and the call would wait for ever.
+	BeginTx(ctx context.Context) (Tx, error)
 
 	// BeginRun records the start of an execution in tool_runs and returns
 	// its id. The row is committed at once, so it survives a failed write.

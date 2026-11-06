@@ -101,7 +101,7 @@ type Backend interface {
 }
 
 type Tx interface {
-    SelectRow(ctx context.Context, table string, key Key, fields []string) (Row, error)
+    SelectRow(ctx context.Context, table string, key Key, fields []string) (Row, bool, error)
     ProjectedRow(ctx context.Context, table string, recordKey string) (Row, error)
     Upsert(ctx context.Context, table string, key Key, values Values, mode WriteMode) ([]FieldChange, error)
     AppendHistory(ctx context.Context, table string, recordKey string, changes []FieldChange, runID int64, at time.Time, source HistorySource) error
@@ -111,6 +111,10 @@ type Tx interface {
     Rollback() error
 }
 ```
+
+`SelectRow` returns `false` when no record matches the key and an `ambiguous_key` error (exit 3) when two or more do: the key columns must be `UNIQUE`. It matches with `IS`, so a NULL key value matches a NULL, and it reads every column as `+"column"`: the unary plus gives the expression no declared type, so the driver does not turn the text of a `DATE`, `DATETIME` or `TIMESTAMP` column into a `time.Time` that would no longer read back as the same text. `Upsert` reads the record, writes with `INSERT` or `UPDATE`, reads it again and reports the fields whose stored text differs, ordered by field name; a record that did not exist has a NULL old value for every field. `Rollback` after `Commit` returns nil so that `defer tx.Rollback()` is safe.
+
+While a `Tx` is open, every method of the `Backend` returns an `internal` error, because the pool holds one connection and the call would otherwise wait for ever. Every identifier that comes from the user is quoted with `quoteIdent` (double quotes, an embedded quote doubled); values always go as `?` parameters.
 
 `Tx` does not embed `Backend`: a nested transaction does not exist in SQLite, and the narrow interface makes that impossible to write. The reads that feed the history — `SelectRow` and `ProjectedRow` — exist **only** on `Tx`, so that it is impossible to read them outside the transaction that writes.
 
@@ -273,6 +277,8 @@ CREATE INDEX IF NOT EXISTS idx_{table}_history_run    ON {table}_history(run_id)
 The data table is never created nor altered.
 
 `old_is_null` and `new_is_null` separate NULL from empty text without depending on a magic value.
+
+Key fields never get a history row: they are in the `record_key`. The first row of a record that did not exist has `old_value` NULL and `old_is_null = 1`: the record was not there. A field written as NULL on a record that did not exist changes nothing (NULL to NULL) and so has no row. An existing `{table}_history` is checked against this DDL before anything is created and a different schema is `contract_mismatch`, naming SPEC §4; the data table is never touched.
 
 ### `record_key`
 
