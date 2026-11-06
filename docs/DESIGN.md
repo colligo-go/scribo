@@ -162,7 +162,7 @@ All persistence goes through `db.Backend`. One implementation in v1. Handlers ne
 
 ### Infrastructure
 
-Latest stable Go. MIT. cobra. v0 until the interface stabilises.
+Go in lockstep with Colligo: both repositories build the same shared database, and the same Go version on both sides keeps `encoding/json`, `database/sql` and the runtime behaving alike, so a difference between the tools is never a difference between compilers. MIT. cobra. v0 until the interface stabilises.
 
 ---
 
