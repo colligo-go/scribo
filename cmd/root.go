@@ -10,7 +10,14 @@ import (
 
 type handler func(*cobra.Command, []string) error
 
+type globalOptions struct {
+	db          string
+	table       string
+	busyTimeout int
+}
+
 func newRootCommand() *cobra.Command {
+	options := &globalOptions{}
 	root := &cobra.Command{
 		Use:           "scribo",
 		Short:         "Ledger of pipeline results: values per sample, with provenance and staleness",
@@ -21,6 +28,10 @@ func newRootCommand() *cobra.Command {
 			return command.Help()
 		},
 	}
+	root.PersistentFlags().StringVar(&options.db, "db", "", "path of the SQLite database file")
+	root.PersistentFlags().StringVar(&options.table, "table", "", "name of the data table")
+	root.PersistentFlags().IntVar(&options.busyTimeout, "busy-timeout", 5000, "milliseconds to wait for a lock held by another process")
+	root.AddCommand(newUpsertCommand(options))
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
 		return usageError(err)
 	})

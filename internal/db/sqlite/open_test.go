@@ -277,3 +277,31 @@ func TestTableExists(t *testing.T) {
 		}
 	}
 }
+
+func TestColumns(t *testing.T) {
+	backend := openBackend(t, newDatabaseFile(t), localFS, db.OpenOptions{})
+	if _, err := backend.db.Exec(`CREATE TABLE qc (sample TEXT NOT NULL, rate REAL, n INTEGER, d DATETIME, untyped)`); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := backend.Columns(context.Background(), "qc")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := []db.Column{
+		{Name: "sample", DeclaredType: "TEXT", Affinity: "TEXT", Nullable: false, Declared: true},
+		{Name: "rate", DeclaredType: "REAL", Affinity: "REAL", Nullable: true, Declared: true},
+		{Name: "n", DeclaredType: "INTEGER", Affinity: "INTEGER", Nullable: true, Declared: true},
+		{Name: "d", DeclaredType: "DATETIME", Affinity: "NUMERIC", Nullable: true, Declared: true},
+		{Name: "untyped", DeclaredType: "", Affinity: "BLOB", Nullable: true, Declared: false},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %d columns, want %d: %+v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("column %d = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}

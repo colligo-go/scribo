@@ -101,7 +101,7 @@ type Backend interface {
 }
 
 type Tx interface {
-    SelectRow(ctx context.Context, table string, key Key, fields []string) (Row, error)
+    SelectRow(ctx context.Context, table string, key Key, fields []string) (Row, bool, error)
     ProjectedRow(ctx context.Context, table string, recordKey string) (Row, error)
     Upsert(ctx context.Context, table string, key Key, values Values, mode WriteMode) ([]FieldChange, error)
     AppendHistory(ctx context.Context, table string, recordKey string, changes []FieldChange, runID int64, at time.Time, source HistorySource) error
@@ -111,6 +111,10 @@ type Tx interface {
     Rollback() error
 }
 ```
+
+`SelectRow` returns `false` when no record matches the key and an `ambiguous_key` error (exit 3) when two or more do: the key columns must be `UNIQUE`. It matches with `IS`, so a NULL key value matches a NULL, and it reads every column as `+"column"`: the unary plus gives the expression no declared type, so the driver does not turn the text of a `DATE`, `DATETIME` or `TIMESTAMP` column into a `time.Time` that would no longer read back as the same text. `Upsert` reads the record, writes with `INSERT` or `UPDATE`, reads it again and reports the fields whose stored text differs, ordered by field name; a record that did not exist has a NULL old value for every field. `Rollback` after `Commit` returns nil so that `defer tx.Rollback()` is safe.
+
+While a `Tx` is open, every method of the `Backend` returns an `internal` error, because the pool holds one connection and the call would otherwise wait for ever. Every identifier that comes from the user is quoted with `quoteIdent` (double quotes, an embedded quote doubled); values always go as `?` parameters.
 
 `Tx` does not embed `Backend`: a nested transaction does not exist in SQLite, and the narrow interface makes that impossible to write. The reads that feed the history — `SelectRow` and `ProjectedRow` — exist **only** on `Tx`, so that it is impossible to read them outside the transaction that writes.
 
@@ -143,10 +147,11 @@ type OpenOptions struct {
 }
 
 type Column struct {
-    Name     string
-    Affinity string
-    Nullable bool
-    Declared bool
+    Name         string
+    DeclaredType string
+    Affinity     string
+    Nullable     bool
+    Declared     bool
 }
 
 type Key    map[string]Value
@@ -273,6 +278,8 @@ The data table is never created nor altered.
 
 `old_is_null` and `new_is_null` separate NULL from empty text without depending on a magic value.
 
+Key fields never get a history row: they are in the `record_key`. The first row of a record that did not exist has `old_value` NULL and `old_is_null = 1`: the record was not there. A field written as NULL on a record that did not exist changes nothing (NULL to NULL) and so has no row. An existing `{table}_history` is checked against this DDL before anything is created and a different schema is `contract_mismatch`, naming SPEC §4; the data table is never touched.
+
 ### `record_key`
 
 A JSON array of `[name, value]` pairs ordered by field name, without spaces, a NULL value as JSON `null`:
@@ -356,7 +363,12 @@ FIELD=94.3       Value{Raw: "94.3", IsNull: false}
 
 There is no magic value: a typed `null` is text. A real NULL only through `--null`, which can be repeated. In the `--batch` formats: TSV and CSV use an empty cell with an explicit `--empty-as-null`, and JSON uses native `null`.
 
-**Coercion on write.** A column `INTEGER`, `REAL` or `NUMERIC` and a value that parses as a number → bound as a number. A non-numeric value → `invalid_value`, exit 3.
+**Coercion on write.** A numeric column and a value that is a decimal number → bound as a number. A value that is not → `invalid_value`, exit 3.
+
+- A numeric column is one with `INTEGER` or `REAL` affinity, or a `NUMERIC` column declared as `NUMERIC` or `DECIMAL`. `DATE`, `DATETIME`, `TIMESTAMP`, `BOOLEAN` and every other type that is `NUMERIC` only by elimination in SQLite's affinity rules are text: a date in text must never become `invalid_value` for not being a number.
+- The affinity of a declared type follows the order of SQLite's own rules (`sqlite.org/datatype3.html` §3.1): contains `INT` → `INTEGER`; `CHAR`, `CLOB` or `TEXT` → `TEXT`; `BLOB` or no type → `BLOB`; `REAL`, `FLOA` or `DOUB` → `REAL`; otherwise `NUMERIC`. `ANY`, the flexible type of a `STRICT` table, is `BLOB`.
+- The accepted literal is `[+-]?(digits[.digits*]|.digits)([eE][+-]?digits)?`, checked by a regular expression before `strconv` sees the text. `strconv.ParseFloat` alone would accept `NaN`, `Inf`, `0x1A` and `1_000`; those, a leading or trailing space and the empty text are `invalid_value`. An `INTEGER` column takes only `[+-]?digits` that fit in 64 bits, so `94.3`, `1e3` and an overflow are refused. `REAL` and `NUMERIC` bind an integer text as an integer and any other as a float.
+- What is compared and written to the history is the canonical text of the stored value, not what the user typed: `94.30` over `94.3` in a `REAL` column is no change, and `01` and `1` in an `INTEGER` key are the same record. Integers render in base 10 and floats as the shortest text that reads back as the same number.
 
 **Comparison.** `>`, `<`, `>=`, `<=` against a column with `Declared=false` or textual affinity → `untyped_comparison`, exit 2, suggesting `--force-text`.
 
@@ -440,6 +452,22 @@ Exit code 0 if nothing is stale, 3 if there are stale items.
 scribo upsert --db DB --table T [--key K=V]... [--sample S] [FIELD=VALUE]... [--null FIELD]... [--input PATH]... [--input-result T:K]... [--input-field F]
 scribo upsert --db DB --table T --batch PATH|- [--format csv|tsv|json] [--empty-as-null]
 ```
+
+Flags of Slice 1:
+
+```
+--db           path of the database file, which must already exist   required
+--table        name of the data table, which must already exist      required
+--key          FIELD=VALUE naming the record; repeat for a composite key   required
+--null         FIELD to set to a real NULL; repeatable
+--insert-only  key_already_exists if the record exists
+--update-only  key_not_found if the record does not exist
+--busy-timeout milliseconds to wait for a lock; default 5000, must be positive
+```
+
+`FIELD=VALUE` arguments are split at the first `=` and `--key` and `--null` are repeatable string flags that are never split on commas, so a value or a key such as `a,b` stays one value. A usage error (exit 1) is raised before the database is opened for: a missing `--db`, `--table` or `--key`; nothing to write; an argument without `=` or with an empty name; a field given twice, including `FIELD=1` with `--null FIELD`; a key field also written; a repeated key; `--insert-only` with `--update-only`; a `--busy-timeout` that is not positive. Success prints nothing.
+
+The record key is the `record_key` of the canonical form of the key values (§7), so `replicate=01` and `replicate=1` name the same record. A table is refused with `reserved_table` (exit 2) when it is `tool_runs`, `result_inputs`, `input_signals`, `samples`, `files`, `facts` or `study_meta`, ends in `_history` or starts with `sqlite_`, compared without regard to case. Slice 1 has no `--sample`, `--input`, `--batch`, `--dry-run`, `--step`, `--quiet` or `--debug`; they arrive in later slices.
 
 `--sample S` resolves through Colligo's `samples` table and adds the key `sample=<id>`. `--insert-only`, `--update-only`, `--dry-run`, `--progress`.
 
@@ -547,9 +575,9 @@ ERROR [<typed_code>]: <main message>
 → <context, line of the error, suggestion>
 ```
 
-Typed codes: `table_not_found`, `column_not_found`, `key_not_found`, `key_already_exists`, `invalid_value`, `untyped_comparison`, `unknown_sample`, `input_not_found`, `invalid_rules`, `invariant_violated`, `rule_unavailable`, `colligo_required`, `contract_mismatch`, `stale_results`, `nondeterministic_change`, `file_not_found`, `invalid_format`, `batch_failed`, `db_busy`, `permission_denied`, `synced_path`, `pragma_ineffective`, `usage`, `internal`, `io_error`, `network_filesystem`.
+Typed codes: `table_not_found`, `column_not_found`, `key_not_found`, `key_already_exists`, `invalid_value`, `untyped_comparison`, `unknown_sample`, `input_not_found`, `invalid_rules`, `invariant_violated`, `rule_unavailable`, `colligo_required`, `contract_mismatch`, `stale_results`, `nondeterministic_change`, `file_not_found`, `invalid_format`, `batch_failed`, `db_busy`, `permission_denied`, `synced_path`, `pragma_ineffective`, `usage`, `internal`, `io_error`, `network_filesystem`, `constraint_failed`, `reserved_table`, `ambiguous_key`.
 
-New in Slice 1: `io_error` (system error with no more specific code, exit 5) and `network_filesystem`, which is a warning, never an error.
+New in Slice 1: `constraint_failed` (the database refused a value: NOT NULL, UNIQUE, CHECK or a trigger; exit 3), `reserved_table` (the table is one Scribo or Colligo owns, or a `_history` or `sqlite_` table; exit 2), `ambiguous_key` (a key matches more than one record because its columns are not UNIQUE; exit 3), `io_error` (a database error with no more specific code, exit 5) and `network_filesystem`, which is a warning, never an error.
 
 Warnings use the same shape with a different prefix, and do not change the exit status:
 
