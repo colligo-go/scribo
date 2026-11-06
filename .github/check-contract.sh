@@ -45,7 +45,7 @@ fi
 remote=$(mktemp)
 trap 'rm -f "$remote"' EXIT
 if ! fetch_remote >"$remote"; then
-  echo "cannot read ${path} from ${repo}@main: set the COLLIGO_READ_TOKEN secret (read access to repository contents) while the repository is private" >&2
+  echo "cannot read ${path} from ${repo}@main: check the network, or set GH_TOKEN if the repository becomes private" >&2
   exit 1
 fi
 compare "${1:-$path}" "$remote"
