@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/colligo-go/scribo/internal/contract"
 	"github.com/colligo-go/scribo/internal/db"
 	"github.com/colligo-go/scribo/internal/exitcode"
 )
@@ -73,6 +74,11 @@ func (b *Backend) Open(ctx context.Context, path string, opts db.OpenOptions) er
 		return classifyFileError(err, absPath)
 	}
 	b.db = handle
+
+	if err := b.checkTable(ctx, "tool_runs", contract.ToolRunsDDL); err != nil {
+		b.Close()
+		return err
+	}
 	return nil
 }
 
@@ -104,4 +110,16 @@ func (b *Backend) TableExists(ctx context.Context, table string) (bool, error) {
 		return false, err
 	}
 	return true, nil
+}
+
+func (b *Backend) inTx(ctx context.Context, work func(*sql.Tx) error) error {
+	tx, err := b.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	if err := work(tx); err != nil {
+		tx.Rollback()
+		return err
+	}
+	return tx.Commit()
 }

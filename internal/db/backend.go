@@ -35,4 +35,8 @@ type Backend interface {
 	Warnings() []exitcode.Warning
 
 	TableExists(ctx context.Context, table string) (bool, error)
+
+	// EnsureContractTables creates the contract tables Scribo may create,
+	// with the exact DDL of CONTRACT.md, and checks them against it.
+	EnsureContractTables(ctx context.Context) error
 }
