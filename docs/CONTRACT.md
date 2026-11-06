@@ -23,7 +23,7 @@ Rules:
 
 ## 2. Opening the database
 
-Identical in both tools, implemented in the common core (`store/open`).
+Identical in both tools, each implementing it in its own code.
 
 1. `statfs` on the database directory. Network type (`nfs`, `nfs4`, `cifs`, `smb2`, `lustre`, `gpfs`, `fuse.*`, `afs`, `9p`) → journal mode `DELETE`, with a warning on stderr. Local → `WAL`. An explicit override is recorded in `tool_runs`.
 2. PRAGMAs in the DSN, applied to every connection: `foreign_keys(1)`, `journal_mode(<resolved>)`, `synchronous(NORMAL)`, `busy_timeout(<value>)`, and `_txlock=immediate`.
