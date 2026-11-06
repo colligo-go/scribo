@@ -316,15 +316,30 @@ func (t *Tx) AppendHistory(ctx context.Context, table string, recordKey string, 
 	if source == db.SourceReconciled {
 		sourceName = "reconciled"
 	}
+	if len(changes) == 0 {
+		return nil
+	}
+	history := quoteIdent(historyTableName(table))
+	changedAt := timestamp(at)
+	var latest sql.NullString
+	err := t.tx.QueryRowContext(ctx,
+		fmt.Sprintf("SELECT max(changed_at) FROM %s WHERE record_key = ?", history), recordKey).Scan(&latest)
+	if err != nil {
+		return translate(err)
+	}
+	if latest.Valid && latest.String > changedAt {
+		changedAt = latest.String
+	}
+
 	statement := fmt.Sprintf(
 		`INSERT INTO %s (run_id, record_key, field, old_value, old_is_null, new_value, new_is_null, source, changed_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, quoteIdent(historyTableName(table)))
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, history)
 	for _, change := range changes {
 		_, err := t.tx.ExecContext(ctx, statement,
 			runID, recordKey, change.Field,
 			nullableValue(change.OldValue), boolToInt(change.OldValue.IsNull),
 			nullableValue(change.NewValue), boolToInt(change.NewValue.IsNull),
-			sourceName, timestamp(at))
+			sourceName, changedAt)
 		if err != nil {
 			return translate(err)
 		}

@@ -363,3 +363,74 @@ func TestAppendHistoryRows(t *testing.T) {
 		t.Errorf("row 0 = %+v", got[0])
 	}
 }
+
+func historyFixture(t *testing.T) (*Backend, int64) {
+	t.Helper()
+	backend := newQCBackend(t, qcDDL)
+	ctx := context.Background()
+	if err := backend.EnsureHistoryTable(ctx, "rnaseq_qc"); err != nil {
+		t.Fatal(err)
+	}
+	runID, err := backend.BeginRun(ctx, db.RunMeta{ToolVersion: "v", GitSHA: "g", GoVersion: "go", ArgvShape: "{}"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return backend, runID
+}
+
+func appendOne(t *testing.T, backend *Backend, recordKey string, runID int64, at time.Time) {
+	t.Helper()
+	tx, err := backend.BeginTx(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	change := []db.FieldChange{{Field: "note", OldValue: db.Value{IsNull: true}, NewValue: db.Value{Raw: "x"}}}
+	if err := tx.AppendHistory(context.Background(), "rnaseq_qc", recordKey, change, runID, at, db.SourceScribo); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestChangedAtNeverGoesBackWithinARecord(t *testing.T) {
+	backend, runID := historyFixture(t)
+	const future = "2099-01-01T00:00:00.000Z"
+	if _, err := backend.db.Exec(`INSERT INTO rnaseq_qc_history
+		(run_id, record_key, field, old_value, old_is_null, new_value, new_is_null, source, changed_at)
+		VALUES (?, 'R', 'note', NULL, 1, 'a', 0, 'scribo', ?)`, runID, future); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC)
+
+	appendOne(t, backend, "R", runID, now)
+	appendOne(t, backend, "R2", runID, now)
+
+	rows, err := backend.db.Query(`SELECT id, record_key, changed_at FROM rnaseq_qc_history ORDER BY id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var got [][3]string
+	for rows.Next() {
+		var id, key, changedAt string
+		if err := rows.Scan(&id, &key, &changedAt); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, [3]string{id, key, changedAt})
+	}
+	want := [][3]string{
+		{"1", "R", future},
+		{"2", "R", future},
+		{"3", "R2", "2026-11-06T12:00:00.000Z"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("rows = %v", got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("row %d = %v, want %v", i, got[i], want[i])
+		}
+	}
+}

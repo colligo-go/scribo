@@ -278,6 +278,8 @@ The data table is never created nor altered.
 
 `old_is_null` and `new_is_null` separate NULL from empty text without depending on a magic value.
 
+`changed_at` never goes back within a record. The order of the history is `(changed_at, id)` and `changed_at` comes from the clock of whoever writes: two cluster nodes with clocks apart, or an NTP step backwards, would give a later write an earlier `changed_at`, and the projection (§6) would pick the wrong value. Before appending, `AppendHistory` reads `max(changed_at)` of the record (through `idx_{table}_history_record`) and writes the later of that and its own time; the fixed format makes string order the order of time, and on a tie `id` decides. The rule is per record: other records keep their own clock.
+
 Key fields never get a history row: they are in the `record_key`. The first row of a record that did not exist has `old_value` NULL and `old_is_null = 1`: the record was not there. A field written as NULL on a record that did not exist changes nothing (NULL to NULL) and so has no row. An existing `{table}_history` is checked against this DDL before anything is created and a different schema is `contract_mismatch`, naming SPEC §4; the data table is never touched.
 
 ### `record_key`
