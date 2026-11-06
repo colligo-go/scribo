@@ -143,10 +143,11 @@ type OpenOptions struct {
 }
 
 type Column struct {
-    Name     string
-    Affinity string
-    Nullable bool
-    Declared bool
+    Name         string
+    DeclaredType string
+    Affinity     string
+    Nullable     bool
+    Declared     bool
 }
 
 type Key    map[string]Value
@@ -356,7 +357,12 @@ FIELD=94.3       Value{Raw: "94.3", IsNull: false}
 
 There is no magic value: a typed `null` is text. A real NULL only through `--null`, which can be repeated. In the `--batch` formats: TSV and CSV use an empty cell with an explicit `--empty-as-null`, and JSON uses native `null`.
 
-**Coercion on write.** A column `INTEGER`, `REAL` or `NUMERIC` and a value that parses as a number → bound as a number. A non-numeric value → `invalid_value`, exit 3.
+**Coercion on write.** A numeric column and a value that is a decimal number → bound as a number. A value that is not → `invalid_value`, exit 3.
+
+- A numeric column is one with `INTEGER` or `REAL` affinity, or a `NUMERIC` column declared as `NUMERIC` or `DECIMAL`. `DATE`, `DATETIME`, `TIMESTAMP`, `BOOLEAN` and every other type that is `NUMERIC` only by elimination in SQLite's affinity rules are text: a date in text must never become `invalid_value` for not being a number.
+- The affinity of a declared type follows the order of SQLite's own rules (`sqlite.org/datatype3.html` §3.1): contains `INT` → `INTEGER`; `CHAR`, `CLOB` or `TEXT` → `TEXT`; `BLOB` or no type → `BLOB`; `REAL`, `FLOA` or `DOUB` → `REAL`; otherwise `NUMERIC`. `ANY`, the flexible type of a `STRICT` table, is `BLOB`.
+- The accepted literal is `[+-]?(digits[.digits*]|.digits)([eE][+-]?digits)?`, checked by a regular expression before `strconv` sees the text. `strconv.ParseFloat` alone would accept `NaN`, `Inf`, `0x1A` and `1_000`; those, a leading or trailing space and the empty text are `invalid_value`. An `INTEGER` column takes only `[+-]?digits` that fit in 64 bits, so `94.3`, `1e3` and an overflow are refused. `REAL` and `NUMERIC` bind an integer text as an integer and any other as a float.
+- What is compared and written to the history is the canonical text of the stored value, not what the user typed: `94.30` over `94.3` in a `REAL` column is no change, and `01` and `1` in an `INTEGER` key are the same record. Integers render in base 10 and floats as the shortest text that reads back as the same number.
 
 **Comparison.** `>`, `<`, `>=`, `<=` against a column with `Declared=false` or textual affinity → `untyped_comparison`, exit 2, suggesting `--force-text`.
 

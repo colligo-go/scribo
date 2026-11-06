@@ -48,6 +48,9 @@ type Backend interface {
 
 	TableExists(ctx context.Context, table string) (bool, error)
 
+	// Columns lists the columns of a table in declaration order.
+	Columns(ctx context.Context, table string) ([]Column, error)
+
 	// EnsureContractTables creates the contract tables Scribo may create,
 	// with the exact DDL of CONTRACT.md, and checks them against it.
 	EnsureContractTables(ctx context.Context) error
