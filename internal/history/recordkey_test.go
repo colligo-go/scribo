@@ -44,6 +44,48 @@ func TestRecordKeyCanonicalForm(t *testing.T) {
 	}
 }
 
+func TestRecordKeyEscapingIsPinned(t *testing.T) {
+	tests := []struct {
+		name    string
+		raw     string
+		encoded string
+	}{
+		{"NUL", "\x00", `"\u0000"`},
+		{"backspace", "\b", `"\b"`},
+		{"form feed", "\f", `"\f"`},
+		{"newline", "\n", `"\n"`},
+		{"carriage return", "\r", `"\r"`},
+		{"tab", "\t", `"\t"`},
+		{"unit separator", "\x1f", `"\u001f"`},
+		{"DEL is raw", "\x7f", "\"\x7f\""},
+		{"quote", `"`, `"\""`},
+		{"backslash", `\`, `"\\"`},
+		{"slash is raw", "/", `"/"`},
+		{"line separator", "\u2028", `"\u2028"`},
+		{"paragraph separator", "\u2029", `"\u2029"`},
+		{"latin is raw", "é", `"é"`},
+		{"emoji is raw", "😀", `"😀"`},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			asValue, err := RecordKey(db.Key{"f": text(test.raw)})
+			if err != nil {
+				t.Fatalf("RecordKey: %v", err)
+			}
+			if want := `[["f",` + test.encoded + `]]`; asValue != want {
+				t.Errorf("as value: got %q, want %q", asValue, want)
+			}
+			asName, err := RecordKey(db.Key{test.raw: text("v")})
+			if err != nil {
+				t.Fatalf("RecordKey: %v", err)
+			}
+			if want := `[[` + test.encoded + `,"v"]]`; asName != want {
+				t.Errorf("as name: got %q, want %q", asName, want)
+			}
+		})
+	}
+}
+
 func TestRecordKeyIndependentOfInsertionOrder(t *testing.T) {
 	names := []string{"delta", "alpha", "charlie", "bravo", "echo"}
 	want := ""
