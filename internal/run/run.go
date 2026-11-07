@@ -3,6 +3,7 @@ package run
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"runtime"
 	"runtime/debug"
@@ -34,6 +35,11 @@ func Meta(argvShape, step string) db.RunMeta {
 		Step:        step,
 		Host:        host,
 	}
+}
+
+func Version() string {
+	toolVersion, gitSHA := buildDetails()
+	return fmt.Sprintf("%s (commit %s, %s)", toolVersion, gitSHA, runtime.Version())
 }
 
 func buildDetails() (toolVersion, gitSHA string) {

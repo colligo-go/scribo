@@ -7,8 +7,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/colligo-go/scribo/internal/exitcode"
 )
 
 var binaryPath string
@@ -106,5 +109,36 @@ func TestExitCodesAndStreams(t *testing.T) {
 				t.Errorf("stdout = %q, want empty", got.Stdout)
 			}
 		})
+	}
+}
+
+func TestVersion(t *testing.T) {
+	t.Parallel()
+	got := runScribo(t, "--version")
+
+	if got.ExitCode != 0 || got.Stderr != "" {
+		t.Errorf("exit %d, stderr %q, want 0 and empty", got.ExitCode, got.Stderr)
+	}
+	if !regexp.MustCompile(`^scribo \S+ \(commit \S+, go\S+\)\n$`).MatchString(got.Stdout) {
+		t.Errorf("stdout = %q", got.Stdout)
+	}
+}
+
+func TestHelpExitCodes(t *testing.T) {
+	t.Parallel()
+	got := runScribo(t, "help", "exit-codes")
+
+	if got.ExitCode != 0 || got.Stderr != "" {
+		t.Errorf("exit %d, stderr %q, want 0 and empty", got.ExitCode, got.Stderr)
+	}
+	for _, info := range exitcode.Codes {
+		if !strings.Contains(got.Stdout, info.Code) {
+			t.Errorf("help exit-codes does not mention %s", info.Code)
+		}
+	}
+	for status := 0; status <= 5; status++ {
+		if !regexp.MustCompile(fmt.Sprintf(`(?m)^  %d  \S`, status)).MatchString(got.Stdout) {
+			t.Errorf("help exit-codes has no line for status %d", status)
+		}
 	}
 }

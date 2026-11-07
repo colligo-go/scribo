@@ -1,6 +1,10 @@
 package exitcode
 
-import "testing"
+import (
+	"os"
+	"regexp"
+	"testing"
+)
 
 func TestFormat(t *testing.T) {
 	tests := []struct {
@@ -57,5 +61,55 @@ func TestWarningFormat(t *testing.T) {
 				t.Errorf("Format() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func specTypedCodes(t *testing.T) []string {
+	t.Helper()
+	spec, err := os.ReadFile("../../docs/SPEC.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	line := regexp.MustCompile("(?m)^Typed codes:.*$").FindString(string(spec))
+	if line == "" {
+		t.Fatal("docs/SPEC.md has no line starting with \"Typed codes:\"")
+	}
+	var codes []string
+	for _, match := range regexp.MustCompile("`([a-z_]+)`").FindAllStringSubmatch(line, -1) {
+		codes = append(codes, match[1])
+	}
+	return codes
+}
+
+func TestCodesRegistryMatchesTheSpec(t *testing.T) {
+	inSpec := map[string]bool{}
+	for _, code := range specTypedCodes(t) {
+		inSpec[code] = true
+	}
+	inRegistry := map[string]bool{}
+	for _, info := range Codes {
+		if inRegistry[info.Code] {
+			t.Errorf("code %s is in the registry twice", info.Code)
+		}
+		inRegistry[info.Code] = true
+		if info.Meaning == "" {
+			t.Errorf("code %s has no meaning", info.Code)
+		}
+		if info.Status < WarningStatus || info.Status > System {
+			t.Errorf("code %s has status %d", info.Code, info.Status)
+		}
+	}
+	for code := range inSpec {
+		if !inRegistry[code] {
+			t.Errorf("code %s is in SPEC §12 but not in exitcode.Codes", code)
+		}
+	}
+	for code := range inRegistry {
+		if !inSpec[code] {
+			t.Errorf("code %s is in exitcode.Codes but not in SPEC §12", code)
+		}
+	}
+	if len(inSpec) == 0 {
+		t.Error("no code found in SPEC §12")
 	}
 }

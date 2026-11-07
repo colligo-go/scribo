@@ -489,7 +489,7 @@ Exit code 0 if nothing is stale, 3 if there are stale items.
 --version        prints the version, the Git commit and the Go version, and exits
 ```
 
-`scribo help exit-codes` prints the table of §12 with one line of meaning per code, for whoever writes a pipeline around Scribo.
+`scribo help exit-codes` prints the table of §12 with one line of meaning per code, for whoever writes a pipeline around Scribo. It is generated from one registry, `exitcode.Codes`, and a test keeps that registry and the `Typed codes:` list of §12 identical. `--version` prints `scribo <version> (commit <sha>, <go version>)` on stdout.
 
 A missing table is answered like a missing column: `table_not_found` with `did you mean "rnaseq_qc"?` when a table is within edit distance 2, or the list of data tables (reserved ones left out, at most 20) otherwise. The context of an error never names a command that does not exist yet.
 
