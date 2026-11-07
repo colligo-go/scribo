@@ -124,6 +124,24 @@ Colligo does not align reads, by decision. But the pipeline does, and Scribo sto
 
 `scribo ingest multiqc multiqc_data.json` imports the general per-sample metrics into the declared table. Everyone who runs nf-core already has this file: Scribo is useful in the first minute, without changing the pipeline. The table must exist; `schema --from-multiqc` generates the DDL for review.
 
+### Results of trimming and QC come in through MultiQC modules
+
+The General Statistics table of MultiQC is a summary: a few columns per tool. What a trimming step did — reads before and after, reads cut by adapter, by quality, by length — lives in each module's own data in the same JSON. `--module NAME` imports it, one table per tool, with the tool's version in a `tool_version` column, so `diff` can tell a change of fastp from a change of input. Metric keys become column names verbatim: any renaming rule is a mapping that can collide or change between versions. Sample names are taken verbatim too: stripping `_R1` or `_trimmed` by guessing merges two samples when the guess is wrong.
+
+Scribo does not parse fastp, cutadapt or FastQC itself. MultiQC already reads more than a hundred tools; a second parser per tool would be a worse copy of it.
+
+### The key is a unique key of the table
+
+Found while checking Slice 1: `upsert --key sample=S1` on a table keyed by `(sample, replicate)` found the one matching row, updated it, and wrote its history under `[["sample","S1"]]` instead of the record's full key. The history split in two, and the next write with the full key "reconciled" a change Scribo had made. Requiring the key to be exactly one `UNIQUE` constraint or the `PRIMARY KEY` gives each row a single `record_key` by construction; a table without a unique key is refused, because there is no way to name its records unambiguously.
+
+### Ending by a signal is a clean failure
+
+On a cluster, the scheduler ends a job at its time limit with `SIGTERM`. Without handling it, the data was already safe — SQLite rolls back an unfinished transaction — but the run stayed open in `tool_runs` with no exit code. Catching the signal turns it into an ordinary failure: rollback, `EndRun`, exit 5 with `interrupted`.
+
+### A friendly CLI explains; it does not guess
+
+Usability in Scribo is clarity: an error says what is wrong and the most likely fix (`did you mean`, `drop the % sign`, `use a dot as the decimal separator`), `scribo help exit-codes` documents the contract a pipeline depends on, `--dry-run` shows what a write would do. It is never magic: no default database from the environment, no table created on the fly, no prompt, no output that changes with whether it goes to a terminal (`--format pretty` is asked for), no ambiguous input accepted (a date without a time in `--at`).
+
 ### Type affinity is respected, and an untyped comparison is an error
 
 A numeric comparison against a column without a declared type is lexicographic and silent. On write, a numeric value in a numeric column is bound as a number. In `--where`, `>`, `<`, `>=`, `<=` against a column without a type → error `untyped_comparison`.

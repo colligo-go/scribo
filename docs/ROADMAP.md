@@ -51,9 +51,19 @@ Outcome (2026-11-06): `upsert` and `log --at` work end to end on SQLite opened p
 
 ## Slice 2 — Reading and entry door (current)
 
-Scope: `query` and `export` with `--where` and refusal of untyped comparison; TSV, JSONL and CSV formats; `schema --from` and `--from-multiqc`; `ingest multiqc`.
+Scope:
 
-Criterion: a real `multiqc_data.json` from nf-core/rnaseq becomes a table by `schema --from-multiqc | sqlite3` and is imported by `ingest multiqc` in one transaction; `query` returns the metrics; `--where "field>90"` against a column without a type fails with a clear message.
+- Carried from Slice 1: the key must be exactly one unique key of the table (SPEC §4), fixing the history split by a partial key.
+- Polish: `--version`; `scribo help exit-codes`; suggestion of table names; hints for refused numbers (SPEC §7); the `--key` hint for a positional key field; interruption by signal (SPEC §5); integration tests in parallel; a quick-start in the README.
+- Reading: `query` and `export` with `--where` and refusal of untyped comparison; TSV, JSONL, CSV and `pretty` formats; `log --format pretty`, `--with-runs` and `--at run:N`; `upsert --dry-run`.
+- Entry door: `schema --from` and `--from-multiqc` with `--module`; `ingest multiqc` with `--module` and the tool version.
+
+Criterion:
+
+- A partial key is refused with `key_mismatch` and the history of the record stays in one `record_key`.
+- A real `multiqc_data.json` from nf-core/rnaseq becomes a table by `schema --from-multiqc | sqlite3` and is imported by `ingest multiqc` in one transaction; `query` returns the metrics; `--where "field>90"` against a column without a type fails with a clear message.
+- `--module fastp` of the same file gives a `fastp_qc` table with the reads before and after trimming and the fastp version.
+- Ctrl-C during an upsert leaves the data and its history as they were and the run closed with `interrupted`.
 
 ---
 
@@ -85,7 +95,7 @@ Criterion:
 
 ## Slice 5 — Batch, restricted and polish
 
-Scope: `--batch` with total atomicity, stdin, `_sample` and `_input` columns, `--empty-as-null`, `--progress`; restricted-database regime; exhaustive `--help` with examples; README with a real Colligo → nf-core → Scribo pipeline; GoReleaser Linux and macOS on amd64 and arm64; CI with `-race`, `vet`, lint and comparison of `CONTRACT.md` with Colligo's copy.
+Scope: `--batch` with total atomicity, stdin, `_sample` and `_input` columns, `--empty-as-null`, `--progress`; restricted-database regime; exhaustive `--help` with examples; shell completion of table and column names read from `--db`; README with a real Colligo → nf-core → Scribo pipeline; GoReleaser Linux and macOS on amd64 and arm64; CI with `-race`, `vet`, lint and comparison of `CONTRACT.md` with Colligo's copy.
 
 Criterion: a batch of 1000 lines with an error on line 500 leaves the data table and its history identical, with the failed run recorded in `tool_runs`; `--debug` refused on a restricted database.
 

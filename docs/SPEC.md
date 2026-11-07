@@ -318,6 +318,15 @@ These rules are part of the canonical form, not a detail of the encoder: `record
 
 Injectivity is checked by a native fuzz test (`FuzzRecordKey`): every accepted key decodes back to exactly the original, with NULL, `"null"` and `""` kept apart.
 
+### The key is a unique key of the table
+
+The fields given as the key must be exactly the columns of one `UNIQUE` constraint or of the `PRIMARY KEY` of the data table (an `INTEGER PRIMARY KEY` counts), compared by name: no column missing, none extra.
+
+- A key that is not exactly one of them → `key_mismatch`, exit 2, naming the table's unique keys and what is missing or extra: `the key of rnaseq_qc is (sample, replicate); replicate is missing`.
+- A table with no `UNIQUE` constraint and no `PRIMARY KEY` → `no_unique_key`, exit 2, suggesting one.
+
+Why: one row must have one `record_key`. A partial key (`sample` alone when the key is `sample, replicate`) still finds the row when only one matches, so the write succeeds, but its history goes under a second `record_key`; the record's history splits, and the next write with the full key reconciles a change that Scribo itself made. The rule holds for every command that takes `--key`: `upsert` and `log` in Slice 1, and every later one. `ambiguous_key` stays as a defence that this rule makes unreachable.
+
 ---
 
 ## 5. Flow of a write
@@ -329,6 +338,7 @@ Validation outside the transaction. State and write inside.
 2.  open Backend (§3)                                error → exit 5
 3.  TableExists                                      false → exit 2, table_not_found
 4.  Columns; validate that every field exists        missing → exit 2, column_not_found, suggestion by edit distance
+    and that the key is a unique key (§4)             otherwise → exit 2, key_mismatch or no_unique_key
 5.  coerce values according to affinity              failure → exit 3, invalid_value
 6.  resolve --sample, if any                         failure → exit 3, unknown_sample
 7.  resolve --input into roots                       failure → exit 4, input_not_found
@@ -351,7 +361,9 @@ An error before 10 writes nothing. An error from 11 on leaves the data table, it
 
 `--batch` iterates the lines inside the same transaction. An error on any line → total ROLLBACK, message naming the line.
 
-`--dry-run` executes up to 14 inside a transaction that ends in Rollback and prints the `FieldChange` and the rules evaluated.
+`--dry-run` executes up to 14 inside a transaction that ends in Rollback and prints the `FieldChange` and the rules evaluated. It writes nothing at all, `tool_runs` included, and reports the reconciliation it would record. The output goes to stdout, one line per change in the format of `log` (`source` is `scribo` or `reconciled`), so it can be read and piped like any other data.
+
+**Interruption.** `SIGINT` and `SIGTERM` (Ctrl-C, or the scheduler ending a job at its time limit) cancel the command's context. An open transaction rolls back, a run already begun is closed with `EndRun`, and the command exits 5 with `interrupted`. A second signal ends the process at once; the database is still safe, since SQLite rolls back an unfinished transaction on the next open, and the run stays with `ended_at` NULL, which is how an interrupted run is recognised.
 
 ---
 
@@ -396,6 +408,8 @@ There is no magic value: a typed `null` is text. A real NULL only through `--nul
 - The affinity of a declared type follows the order of SQLite's own rules (`sqlite.org/datatype3.html` §3.1): contains `INT` → `INTEGER`; `CHAR`, `CLOB` or `TEXT` → `TEXT`; `BLOB` or no type → `BLOB`; `REAL`, `FLOA` or `DOUB` → `REAL`; otherwise `NUMERIC`. `ANY`, the flexible type of a `STRICT` table, is `BLOB`.
 - The accepted literal is `[+-]?(digits[.digits*]|.digits)([eE][+-]?digits)?`, checked by a regular expression before `strconv` sees the text. `strconv.ParseFloat` alone would accept `NaN`, `Inf`, `0x1A` and `1_000`; those, a leading or trailing space and the empty text are `invalid_value`. An `INTEGER` column takes only `[+-]?digits` that fit in 64 bits, so `94.3`, `1e3` and an overflow are refused. `REAL` and `NUMERIC` bind an integer text as an integer and any other as a float.
 - What is compared and written to the history is the canonical text of the stored value, not what the user typed: `94.30` over `94.3` in a `REAL` column is no change, and `01` and `1` in an `INTEGER` key are the same record. Integers render in base 10 and floats as the shortest text that reads back as the same number. Negative zero renders as `0`: SQLite compares it equal to zero, and `-0` read back as an integer would give one record two keys. The canonical form is stable — canonicalizing it again gives the same text — and `FuzzCanonicalIsStable` checks that for every column kind.
+
+**Hints for a refused number.** `invalid_value` names the most likely fix in its context line, and never changes what is accepted: a trailing `%` → `drop the % sign: 94.3`; a comma between digits and no dot (`94,3`) → `use a dot as the decimal separator: 94.3`; commas or spaces grouping thousands (`12,000,000`) → `drop the thousands separators: 12000000`.
 
 **Comparison.** `>`, `<`, `>=`, `<=` against a column with `Declared=false` or textual affinity → `untyped_comparison`, exit 2, suggesting `--force-text`.
 
@@ -471,7 +485,12 @@ Exit code 0 if nothing is stale, 3 if there are stale items.
 --rules          path of scribo.rules.toml            optional
 --quiet          suppresses non-essential stdout
 --debug          logs SQL and timings on stderr       forbidden on a restricted database
+--version        prints the version, the Git commit and the Go version, and exits
 ```
+
+`scribo help exit-codes` prints the table of §12 with one line of meaning per code, for whoever writes a pipeline around Scribo.
+
+A missing table is answered like a missing column: `table_not_found` with `did you mean "rnaseq_qc"?` when a table is within edit distance 2, or the list of data tables (reserved ones left out, at most 20) otherwise. The context of an error never names a command that does not exist yet.
 
 ### upsert
 
@@ -500,6 +519,8 @@ The record key is the `record_key` of the canonical form of the key values (§7)
 
 In `--batch`, the special columns `_sample` and `_input` (a `;`-separated list) play the role of the flags per line.
 
+A positional `FIELD=VALUE` whose field is a key column, given without `--key`, gets the hint `did you mean --key sample=S1?` in the usage error.
+
 ### log
 
 ```
@@ -511,6 +532,12 @@ Without `--at`, one line per history row in `(changed_at, id)` order. TSV (the d
 With `--at`, the state at that moment: TSV `field  value  is_null`, one line per field in alphabetical order, or a single JSON object with the fields as sorted keys. `TIMESTAMP` is RFC 3339 with a time and a zone, truncated to the millisecond in UTC; a date alone is ambiguous and is a usage error. `--field` limits both forms to one field and must name a column.
 
 A key with no history: `key_not_found` (exit 3) when no record has it, an empty result (header only, exit 0) when the record exists but was never written by Scribo. `log` writes nothing: no `tool_runs` row, no contract or history table created.
+
+Planned for Slice 2:
+
+- `--format pretty`: the same rows as TSV in aligned columns, with `NULL` shown as `∅` and without the `is_null` columns, for a person at a terminal. It is chosen explicitly, never by detecting a terminal: the output of a command does not change with where it is written.
+- `--with-runs`: adds `tool_version`, `step` and `exit_code` of the run that wrote each row, from `tool_runs`.
+- `--at run:N`: the state right after the last history row that run `N` wrote in this table, every row up to it in `(changed_at, id)` order. A run that wrote nothing in this table → `run_not_found`, exit 3. Run ids are not used as an order by themselves: two runs may start in one order and commit in the other.
 
 ### query, export
 
@@ -530,6 +557,10 @@ scribo schema --from-multiqc multiqc_data.json --table T
 
 Prints the `CREATE TABLE`. It does not execute.
 
+`--from-multiqc` reads the General Statistics table by default; `--module NAME` (for example `fastp`, `cutadapt`, `star`) reads that module's full per-sample data instead, one table per tool. The generated table always has `sample TEXT NOT NULL` and `UNIQUE(sample)`, so it satisfies the key rule (§4), and, with `--module`, a `tool_version TEXT` column.
+
+Column names are the MultiQC metric keys verbatim, as quoted identifiers (`"after_filtering.q30_rate"`, `"percent_duplication"`): no renaming, so the mapping is injective and a re-ingest finds the same columns. Types come from the values in the file: integers → `INTEGER`, other numbers → `REAL`, anything else → `TEXT`.
+
 ### ingest
 
 ```
@@ -539,6 +570,10 @@ scribo ingest ngscheckmate --db DB output_all.txt
 ```
 
 `multiqc` reads the general per-sample metrics and upserts them into the table, one transaction for the whole file. `--map-sample colligo` resolves MultiQC sample names against `samples`; a name with no match → `unknown_sample`, nothing stored.
+
+`--module NAME` imports that module's per-sample data into a table made by `schema --from-multiqc --module NAME`. The sample name is MultiQC's, verbatim, with `--map-sample as-is` (the default): no suffix such as `_R1` or `_trimmed` is stripped by guessing, since a wrong guess merges two samples. When the file records the tool's version, it goes to the `tool_version` column of every record; when it does not, the column stays NULL and a `tool_version_unknown` warning says so. Slice 4's `diff` counts a changed `tool_version` column as the cause `tool`.
+
+There is no parser per tool (fastp, cutadapt, FastQC): MultiQC already reads more than a hundred of them, and its JSON is the one format Scribo follows. A tool MultiQC does not read comes in as TSV, through `schema --from` and `upsert --batch`.
 
 `somalier` and `ngscheckmate` compare the observed relatedness with the declared: the same sample or technical replicate declared and relatedness below `--relatedness-min` → `identity_mismatch`; samples declared distinct above the limit → `identity_mismatch` in both; declared and observed coherent → `identity_confirmed`. Signals stored in `input_signals` for the roots of the samples' inputs.
 
@@ -608,7 +643,9 @@ ERROR [<typed_code>]: <main message>
 → <context, line of the error, suggestion>
 ```
 
-Typed codes: `table_not_found`, `column_not_found`, `key_not_found`, `key_already_exists`, `invalid_value`, `untyped_comparison`, `unknown_sample`, `input_not_found`, `invalid_rules`, `invariant_violated`, `rule_unavailable`, `colligo_required`, `contract_mismatch`, `stale_results`, `nondeterministic_change`, `file_not_found`, `invalid_format`, `batch_failed`, `db_busy`, `permission_denied`, `synced_path`, `pragma_ineffective`, `usage`, `internal`, `io_error`, `network_filesystem`, `constraint_failed`, `reserved_table`, `ambiguous_key`, `history_reconciled`, `history_approximate`.
+Typed codes: `table_not_found`, `column_not_found`, `key_not_found`, `key_already_exists`, `invalid_value`, `untyped_comparison`, `unknown_sample`, `input_not_found`, `invalid_rules`, `invariant_violated`, `rule_unavailable`, `colligo_required`, `contract_mismatch`, `stale_results`, `nondeterministic_change`, `file_not_found`, `invalid_format`, `batch_failed`, `db_busy`, `permission_denied`, `synced_path`, `pragma_ineffective`, `usage`, `internal`, `io_error`, `network_filesystem`, `constraint_failed`, `reserved_table`, `ambiguous_key`, `history_reconciled`, `history_approximate`, `key_mismatch`, `no_unique_key`, `interrupted`, `run_not_found`, `tool_version_unknown`.
+
+New in Slice 2: `key_mismatch` and `no_unique_key` (the key is not exactly one unique key of the table, §4; exit 2), `interrupted` (a signal ended the command, §5; exit 5), `run_not_found` (`log --at run:N` for a run that wrote nothing in the table; exit 3) and the warning `tool_version_unknown` (§10, ingest).
 
 New in Slice 1: `constraint_failed` (the database refused a value: NOT NULL, UNIQUE, CHECK or a trigger; exit 3), `reserved_table` (the table is one Scribo or Colligo owns, or a `_history` or `sqlite_` table; exit 2), `ambiguous_key` (a key matches more than one record because its columns are not UNIQUE; exit 3), `io_error` (a database error with no more specific code, exit 5) and the warnings `network_filesystem`, `history_reconciled` and `history_approximate` (§6), which never change the exit status.
 
