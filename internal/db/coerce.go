@@ -12,6 +12,12 @@ import (
 var (
 	decimalLiteral = regexp.MustCompile(`^[+-]?([0-9]+(\.[0-9]*)?|\.[0-9]+)([eE][+-]?[0-9]+)?$`)
 	integerLiteral = regexp.MustCompile(`^[+-]?[0-9]+$`)
+
+	percentText         = regexp.MustCompile(`^[+-]?(\d+(\.\d*)?|\.\d+)%$`)
+	groupedByComma      = regexp.MustCompile(`^[+-]?\d{1,3}(,\d{3}){2,}(\.\d+)?$`)
+	groupedBySpace      = regexp.MustCompile(`^[+-]?\d{1,3}( \d{3}){2,}(\.\d+)?$`)
+	ambiguousGrouping   = regexp.MustCompile(`^[+-]?\d{1,3},\d{3}$`)
+	commaAsDecimalPoint = regexp.MustCompile(`^[+-]?\d+,\d+$`)
 )
 
 // Coerce turns a user-supplied Value into the Go value to bind to column.
@@ -74,5 +80,32 @@ func isNumeric(column Column) bool {
 
 func notANumber(column Column, v Value) *exitcode.Error {
 	return exitcode.New(exitcode.Data, exitcode.CodeInvalidValue,
-		fmt.Sprintf("%s is %s and %q is not a number", column.Name, column.Affinity, v.Raw), "")
+		fmt.Sprintf("%s is %s and %q is not a number", column.Name, column.Affinity, v.Raw), numberHint(column, v.Raw))
+}
+
+func numberHint(column Column, text string) string {
+	integer := column.Affinity == "INTEGER"
+	switch {
+	case percentText.MatchString(text):
+		value := strings.TrimSuffix(text, "%")
+		if integer && strings.Contains(value, ".") {
+			return "drop the % sign"
+		}
+		return "drop the % sign: " + value
+	case groupedByComma.MatchString(text) || groupedBySpace.MatchString(text):
+		value := strings.NewReplacer(",", "", " ", "").Replace(text)
+		if integer && strings.Contains(value, ".") {
+			return "drop the thousands separators"
+		}
+		return "drop the thousands separators: " + value
+	case integer:
+		return ""
+	case ambiguousGrouping.MatchString(text):
+		withoutComma := strings.Replace(text, ",", "", 1)
+		withDot := strings.Replace(text, ",", ".", 1)
+		return fmt.Sprintf("use a dot as the decimal separator (%s) or drop the thousands separator (%s)", withDot, withoutComma)
+	case commaAsDecimalPoint.MatchString(text):
+		return "use a dot as the decimal separator: " + strings.Replace(text, ",", ".", 1)
+	}
+	return ""
 }

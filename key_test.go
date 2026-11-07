@@ -65,3 +65,101 @@ func TestKeyOnATableWithoutUniqueKeyIsRefused(t *testing.T) {
 		t.Errorf("tables created by a refused key = %s, want 0", got)
 	}
 }
+
+func TestRefusedNumbersExplainTheFix(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		field string
+		value string
+		want  string
+	}{
+		{"percent into real", "Alignment_Rate", "94.3%", "→ drop the % sign: 94.3\n"},
+		{"percent into integer", "Mapped_Reads", "12%", "→ drop the % sign: 12\n"},
+		{"decimal percent into integer", "Mapped_Reads", "94.3%", "→ drop the % sign\n"},
+		{"thousands by commas", "Alignment_Rate", "12,000,000", "→ drop the thousands separators: 12000000\n"},
+		{"thousands by spaces", "Alignment_Rate", "12 000 000", "→ drop the thousands separators: 12000000\n"},
+		{"ambiguous", "Alignment_Rate", "1,234", "→ use a dot as the decimal separator (1.234) or drop the thousands separator (1234)\n"},
+		{"comma as decimal point", "Alignment_Rate", "94,3", "→ use a dot as the decimal separator: 94.3\n"},
+		{"negative comma as decimal point", "Alignment_Rate", "-0,5", "→ use a dot as the decimal separator: -0.5\n"},
+		{"word has no hint", "Alignment_Rate", "abc", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			path := newDB(t, qcTable)
+
+			got := upsertS1(t, path, tt.field+"="+tt.value)
+
+			requireFailure(t, got, 3, "invalid_value")
+			lines := strings.SplitN(got.Stderr, "\n", 2)
+			if lines[1] != tt.want {
+				t.Errorf("context lines = %q, want %q", lines[1], tt.want)
+			}
+		})
+	}
+}
+
+func TestMissingTableSuggestsANearbyOne(t *testing.T) {
+	t.Parallel()
+	path := newDB(t, qcTable)
+
+	got := runScribo(t, "upsert", "--db", path, "--table", "rnaseqqc", "--key", "sample=S1", "--key", "replicate=1", "note=x")
+
+	requireFailure(t, got, 2, "table_not_found")
+	if !strings.Contains(got.Stderr, `→ did you mean "rnaseq_qc"?`) {
+		t.Errorf("stderr = %q, want the suggestion", got.Stderr)
+	}
+	if strings.Contains(got.Stderr, "schema") {
+		t.Errorf("stderr = %q, must not name a command that does not exist yet", got.Stderr)
+	}
+}
+
+func TestMissingTableListsTheDataTablesOnly(t *testing.T) {
+	t.Parallel()
+	path := newDB(t, qcTable, `CREATE TABLE samples_extra (a TEXT, UNIQUE(a))`, `CREATE TABLE samples (id TEXT)`)
+
+	got := runScribo(t, "log", "--db", path, "--table", "zzzzzzzzzz", "--key", "a=1")
+
+	requireFailure(t, got, 2, "table_not_found")
+	if !strings.Contains(got.Stderr, "→ tables: rnaseq_qc, samples_extra\n") {
+		t.Errorf("stderr = %q, want the data tables without the reserved samples", got.Stderr)
+	}
+}
+
+func TestMissingTableOnAnEmptyDatabase(t *testing.T) {
+	t.Parallel()
+	path := newDB(t, `CREATE TABLE gone (a TEXT)`, `DROP TABLE gone`)
+
+	got := runScribo(t, "log", "--db", path, "--table", "x", "--key", "a=1")
+
+	requireFailure(t, got, 2, "table_not_found")
+	if !strings.Contains(got.Stderr, "→ the database has no data table yet\n") {
+		t.Errorf("stderr = %q", got.Stderr)
+	}
+}
+
+func TestUpsertWithoutKeyExplainsWhereItGoes(t *testing.T) {
+	t.Parallel()
+	path := newDB(t, qcTable)
+
+	got := upsert(t, path, "sample=S1", "Alignment_Rate=94.3")
+
+	requireFailure(t, got, 1, "usage")
+	want := "ERROR [usage]: --key is required\n→ the record key goes in --key, for example --key sample=S1\n"
+	if got.Stderr != want {
+		t.Errorf("stderr = %q, want %q", got.Stderr, want)
+	}
+}
+
+func TestUpsertWithoutKeyOrArgumentsIsPlainUsage(t *testing.T) {
+	t.Parallel()
+	path := newDB(t, qcTable)
+
+	got := upsert(t, path)
+
+	requireFailure(t, got, 1, "usage")
+	if !strings.HasPrefix(got.Stderr, "ERROR [usage]: --key is required\n→ run 'scribo upsert --help'") {
+		t.Errorf("stderr = %q", got.Stderr)
+	}
+}

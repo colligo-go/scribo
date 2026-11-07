@@ -122,6 +122,11 @@ type Backend interface {
 
 	TableExists(ctx context.Context, table string) (bool, error)
 
+	// Tables lists the names of every table of the database, in alphabetical
+	// order, without SQLite's own sqlite_ tables. Telling a data table from
+	// one that Scribo or Colligo owns is the caller's job.
+	Tables(ctx context.Context) ([]string, error)
+
 	// Columns lists the columns of a table in declaration order.
 	Columns(ctx context.Context, table string) ([]Column, error)
 

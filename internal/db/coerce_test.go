@@ -99,3 +99,52 @@ func TestCoerceErrorMessage(t *testing.T) {
 		t.Errorf("error = %v, want %q", err, want)
 	}
 }
+
+func TestCoerceHints(t *testing.T) {
+	tests := []struct {
+		name    string
+		declare string
+		raw     string
+		want    string
+	}{
+		{"percent into real", "REAL", "94.3%", "drop the % sign: 94.3"},
+		{"percent into integer", "INTEGER", "12%", "drop the % sign: 12"},
+		{"decimal percent into integer", "INTEGER", "94.3%", "drop the % sign"},
+		{"signed percent", "REAL", "-5%", "drop the % sign: -5"},
+		{"thousands by commas", "REAL", "12,000,000", "drop the thousands separators: 12000000"},
+		{"thousands by spaces", "REAL", "12 000 000", "drop the thousands separators: 12000000"},
+		{"thousands with decimals", "REAL", "1,000,000.5", "drop the thousands separators: 1000000.5"},
+		{"thousands with decimals into integer", "INTEGER", "1,000,000.5", "drop the thousands separators"},
+		{"thousands into integer", "INTEGER", "12,000,000", "drop the thousands separators: 12000000"},
+		{"ambiguous", "REAL", "1,234", "use a dot as the decimal separator (1.234) or drop the thousands separator (1234)"},
+		{"signed ambiguous", "REAL", "-1,234", "use a dot as the decimal separator (-1.234) or drop the thousands separator (-1234)"},
+		{"comma as decimal point", "REAL", "94,3", "use a dot as the decimal separator: 94.3"},
+		{"negative comma as decimal point", "REAL", "-0,5", "use a dot as the decimal separator: -0.5"},
+		{"comma into integer has no hint", "INTEGER", "94,3", ""},
+		{"word", "REAL", "abc", ""},
+		{"percent of a word", "REAL", "abc%", ""},
+		{"misplaced groups", "REAL", "1,23,456", ""},
+		{"two decimal points", "REAL", "1.2.3", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := Coerce(column(tt.declare), Value{Raw: tt.raw})
+
+			var domain *exitcode.Error
+			if !errors.As(err, &domain) {
+				t.Fatalf("Coerce(%q) = %v, want an error", tt.raw, err)
+			}
+			if domain.Context != tt.want {
+				t.Errorf("context = %q, want %q", domain.Context, tt.want)
+			}
+		})
+	}
+}
+
+func TestHintsNeverChangeWhatIsAccepted(t *testing.T) {
+	for _, raw := range []string{"94.3", "12000000", "1234", "-0.5", "1e3"} {
+		if _, err := Coerce(column("REAL"), Value{Raw: raw}); err != nil {
+			t.Errorf("Coerce(%q) = %v, want it accepted", raw, err)
+		}
+	}
+}

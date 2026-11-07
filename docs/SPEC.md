@@ -83,6 +83,7 @@ type Backend interface {
     ColligoPresent(ctx context.Context) (bool, error)
 
     TableExists(ctx context.Context, table string) (bool, error)
+    Tables(ctx context.Context) ([]string, error)
     UniqueKeys(ctx context.Context, table string) ([][]string, error)
     Columns(ctx context.Context, table string) ([]Column, error)
     EnsureContractTables(ctx context.Context) error
@@ -410,7 +411,14 @@ There is no magic value: a typed `null` is text. A real NULL only through `--nul
 - The accepted literal is `[+-]?(digits[.digits*]|.digits)([eE][+-]?digits)?`, checked by a regular expression before `strconv` sees the text. `strconv.ParseFloat` alone would accept `NaN`, `Inf`, `0x1A` and `1_000`; those, a leading or trailing space and the empty text are `invalid_value`. An `INTEGER` column takes only `[+-]?digits` that fit in 64 bits, so `94.3`, `1e3` and an overflow are refused. `REAL` and `NUMERIC` bind an integer text as an integer and any other as a float.
 - What is compared and written to the history is the canonical text of the stored value, not what the user typed: `94.30` over `94.3` in a `REAL` column is no change, and `01` and `1` in an `INTEGER` key are the same record. Integers render in base 10 and floats as the shortest text that reads back as the same number. Negative zero renders as `0`: SQLite compares it equal to zero, and `-0` read back as an integer would give one record two keys. The canonical form is stable — canonicalizing it again gives the same text — and `FuzzCanonicalIsStable` checks that for every column kind.
 
-**Hints for a refused number.** `invalid_value` names the most likely fix in its context line, and never changes what is accepted: a trailing `%` → `drop the % sign: 94.3`; a comma between digits and no dot (`94,3`) → `use a dot as the decimal separator: 94.3`; commas or spaces grouping thousands (`12,000,000`) → `drop the thousands separators: 12000000`.
+**Hints for a refused number.** `invalid_value` names the most likely fix in its context line, and never changes what is accepted. The first rule that matches wins:
+
+- a trailing `%` (`94.3%`) → `drop the % sign: 94.3`;
+- commas or spaces grouping thousands, at least two groups (`12,000,000`, `12 000 000`) → `drop the thousands separators: 12000000`;
+- one comma and exactly three digits after it (`1,234`), which can be either a decimal comma or a thousands separator → `use a dot as the decimal separator (1.234) or drop the thousands separator (1234)`;
+- a comma between digits otherwise (`94,3`) → `use a dot as the decimal separator: 94.3`.
+
+An `INTEGER` column never gets a suggestion it would refuse itself: a `%` or grouping hint whose value has a decimal point drops the value (`drop the % sign`), and the two comma hints are not given at all.
 
 **Comparison.** `>`, `<`, `>=`, `<=` against a column with `Declared=false` or textual affinity → `untyped_comparison`, exit 2, suggesting `--force-text`.
 
@@ -491,7 +499,7 @@ Exit code 0 if nothing is stale, 3 if there are stale items.
 
 `scribo help exit-codes` prints the table of §12 with one line of meaning per code, for whoever writes a pipeline around Scribo. It is generated from one registry, `exitcode.Codes`, and a test keeps that registry and the `Typed codes:` list of §12 identical. `--version` prints `scribo <version> (commit <sha>, <go version>)` on stdout.
 
-A missing table is answered like a missing column: `table_not_found` with `did you mean "rnaseq_qc"?` when a table is within edit distance 2, or the list of data tables (reserved ones left out, at most 20) otherwise. The context of an error never names a command that does not exist yet.
+A missing table is answered like a missing column: `table_not_found` with `did you mean "rnaseq_qc"?` when a table is within edit distance 2, or the list of data tables (reserved ones left out, at most 20) otherwise, or `the database has no data table yet` when there is none. `Backend.Tables` lists every table; the command layer leaves out the reserved ones. The context of an error never names a command that does not exist yet.
 
 ### upsert
 
@@ -520,7 +528,7 @@ The record key is the `record_key` of the canonical form of the key values (§7)
 
 In `--batch`, the special columns `_sample` and `_input` (a `;`-separated list) play the role of the flags per line.
 
-A positional `FIELD=VALUE` whose field is a key column, given without `--key`, gets the hint `did you mean --key sample=S1?` in the usage error.
+`--key` is checked in the handler, not by the parser, so that a record key written as a positional argument gets an answer: with positional arguments and no `--key`, the usage error is `--key is required` with the context `the record key goes in --key, for example --key sample=S1`, built from the first positional argument. Without positional arguments there is no such hint.
 
 ### log
 
