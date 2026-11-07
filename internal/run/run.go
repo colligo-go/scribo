@@ -2,14 +2,18 @@ package run
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"runtime"
 	"runtime/debug"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/colligo-go/scribo/internal/db"
+	"github.com/colligo-go/scribo/internal/exitcode"
 )
 
 const unknown = "unknown"
@@ -34,6 +38,11 @@ func Meta(argvShape, step string) db.RunMeta {
 		Step:        step,
 		Host:        host,
 	}
+}
+
+func Version() string {
+	toolVersion, gitSHA := buildDetails()
+	return fmt.Sprintf("%s (commit %s, %s)", toolVersion, gitSHA, runtime.Version())
 }
 
 func buildDetails() (toolVersion, gitSHA string) {
@@ -77,4 +86,18 @@ func ArgvShape(commandPath string, flagNames []string, positional int) string {
 	encoder.SetEscapeHTML(false)
 	encoder.Encode(argvShape{Command: commandPath, Flags: flags, Args: positional})
 	return strings.TrimSuffix(buffer.String(), "\n")
+}
+
+const endRunTimeout = 5 * time.Second
+
+func EndContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), endRunTimeout)
+}
+
+func Interrupted(ctx context.Context, err error) error {
+	if err == nil || ctx.Err() == nil {
+		return err
+	}
+	return exitcode.New(exitcode.System, exitcode.CodeInterrupted,
+		"interrupted by a signal", "the transaction was rolled back; nothing was written")
 }

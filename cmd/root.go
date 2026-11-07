@@ -1,10 +1,12 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"os"
 
 	"github.com/colligo-go/scribo/internal/exitcode"
+	"github.com/colligo-go/scribo/internal/run"
 	"github.com/spf13/cobra"
 )
 
@@ -22,6 +24,7 @@ func newRootCommand() *cobra.Command {
 		Use:           "scribo",
 		Short:         "Ledger of pipeline results: values per sample, with provenance and staleness",
 		Args:          cobra.NoArgs,
+		Version:       run.Version(),
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(command *cobra.Command, _ []string) error {
@@ -33,20 +36,22 @@ func newRootCommand() *cobra.Command {
 	root.PersistentFlags().IntVar(&options.busyTimeout, "busy-timeout", 5000, "milliseconds to wait for a lock held by another process")
 	root.AddCommand(newUpsertCommand(options))
 	root.AddCommand(newLogCommand(options))
+	root.AddCommand(newExitCodesTopic())
+	root.SetVersionTemplate("scribo {{.Version}}\n")
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
 		return usageError(err)
 	})
 	return root
 }
 
-func Execute() *exitcode.Error {
-	return execute(newRootCommand(), os.Args[1:])
+func Execute(ctx context.Context) *exitcode.Error {
+	return execute(ctx, newRootCommand(), os.Args[1:])
 }
 
-func execute(root *cobra.Command, args []string) *exitcode.Error {
+func execute(ctx context.Context, root *cobra.Command, args []string) *exitcode.Error {
 	typeHandlerErrors(root)
 	root.SetArgs(args)
-	err := root.Execute()
+	err := root.ExecuteContext(ctx)
 	if err == nil {
 		return nil
 	}

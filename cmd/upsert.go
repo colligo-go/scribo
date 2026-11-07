@@ -55,7 +55,6 @@ be UNIQUE. Nothing is printed on success.`,
 	command.Flags().StringArrayVar(&nulls, "null", nil, "FIELD to set to a real NULL; repeatable")
 	command.Flags().BoolVar(&insertOnly, "insert-only", false, "fail with key_already_exists if the record exists")
 	command.Flags().BoolVar(&updateOnly, "update-only", false, "fail with key_not_found if the record does not exist")
-	command.MarkFlagRequired("key")
 	command.MarkFlagsMutuallyExclusive("insert-only", "update-only")
 	return command
 }
@@ -63,6 +62,9 @@ be UNIQUE. Nothing is printed on success.`,
 func parseUpsert(options *globalOptions, keys, nulls, args []string, insertOnly, updateOnly bool) (writer.Request, error) {
 	if err := requireGlobals(options, "upsert"); err != nil {
 		return writer.Request{}, err
+	}
+	if len(keys) == 0 && len(args) > 0 {
+		return writer.Request{}, missingKeyHint(args[0])
 	}
 	key, err := parseKeys(keys, "upsert")
 	if err != nil {
@@ -120,4 +122,13 @@ func addField(values db.Values, key db.Key, name string, value db.Value) error {
 	}
 	values[name] = value
 	return nil
+}
+
+func missingKeyHint(first string) *exitcode.Error {
+	example := "sample=S1"
+	if name, _, ok := splitAssignment(first); ok && name != "" {
+		example = first
+	}
+	return exitcode.New(exitcode.Usage, exitcode.CodeUsage, "--key is required",
+		"the record key goes in --key, for example --key "+example)
 }

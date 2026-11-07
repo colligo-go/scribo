@@ -12,7 +12,18 @@ const (
 )
 
 func Suggestion(name string, columns []string) string {
-	sorted := append([]string(nil), columns...)
+	return suggestFrom("columns", name, columns)
+}
+
+func TableSuggestion(name string, tables []string) string {
+	if len(tables) == 0 {
+		return "the database has no data table yet"
+	}
+	return suggestFrom("tables", name, tables)
+}
+
+func suggestFrom(label, name string, candidates []string) string {
+	sorted := append([]string(nil), candidates...)
 	sort.Strings(sorted)
 
 	best := ""
@@ -30,7 +41,7 @@ func Suggestion(name string, columns []string) string {
 	if len(sorted) > maxListedColumns {
 		sorted = sorted[:maxListedColumns]
 	}
-	return "columns: " + strings.Join(sorted, ", ")
+	return label + ": " + strings.Join(sorted, ", ")
 }
 
 func editDistance(a, b string) int {

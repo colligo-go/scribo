@@ -6,6 +6,7 @@ import (
 	"github.com/colligo-go/scribo/internal/db"
 	"github.com/colligo-go/scribo/internal/exitcode"
 	"github.com/colligo-go/scribo/internal/history"
+	"github.com/colligo-go/scribo/internal/run"
 	"github.com/colligo-go/scribo/internal/validate"
 )
 
@@ -25,6 +26,11 @@ type LogResult struct {
 }
 
 func Log(ctx context.Context, backend db.Backend, req LogRequest, warn func(exitcode.Warning)) (LogResult, error) {
+	result, err := log(ctx, backend, req, warn)
+	return result, run.Interrupted(ctx, err)
+}
+
+func log(ctx context.Context, backend db.Backend, req LogRequest, warn func(exitcode.Warning)) (LogResult, error) {
 	if err := backend.Open(ctx, req.DB, db.OpenOptions{BusyTimeout: req.BusyTimeout}); err != nil {
 		return LogResult{}, err
 	}
@@ -42,6 +48,13 @@ func Log(ctx context.Context, backend db.Backend, req LogRequest, warn func(exit
 	}
 	columns, err := validate.Columns(ctx, backend, req.Table, names)
 	if err != nil {
+		return LogResult{}, err
+	}
+	uniqueKeys, err := backend.UniqueKeys(ctx, req.Table)
+	if err != nil {
+		return LogResult{}, err
+	}
+	if err := validate.Key(req.Table, uniqueKeys, req.Key); err != nil {
 		return LogResult{}, err
 	}
 	key, err := validate.CanonicalKey(columns, req.Key)

@@ -111,6 +111,28 @@ func (b *Backend) TableExists(ctx context.Context, table string) (bool, error) {
 	return b.tableExists(ctx, b.db, table)
 }
 
+func (b *Backend) Tables(ctx context.Context) ([]string, error) {
+	if err := b.guard(); err != nil {
+		return nil, err
+	}
+	rows, err := b.db.QueryContext(ctx,
+		`SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite\_%' ESCAPE '\' ORDER BY name`)
+	if err != nil {
+		return nil, translate(err)
+	}
+	defer rows.Close()
+
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, translate(err)
+		}
+		names = append(names, name)
+	}
+	return names, translate(rows.Err())
+}
+
 func (b *Backend) guard() error {
 	if b.txOpen {
 		return exitcode.New(exitcode.System, exitcode.CodeInternal,

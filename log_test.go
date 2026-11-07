@@ -53,6 +53,7 @@ func between(t *testing.T, path, first, second string) time.Time {
 }
 
 func TestLogShowsTheWholeHistoryInOrder(t *testing.T) {
+	t.Parallel()
 	path := threeWrites(t)
 
 	got := logS1(t, path)
@@ -83,6 +84,7 @@ func TestLogShowsTheWholeHistoryInOrder(t *testing.T) {
 }
 
 func TestLogFiltersByField(t *testing.T) {
+	t.Parallel()
 	path := threeWrites(t)
 
 	lines := requireData(t, logS1(t, path, "--field", "Mapped_Reads"))
@@ -98,6 +100,7 @@ func TestLogFiltersByField(t *testing.T) {
 }
 
 func TestLogEscapesTSV(t *testing.T) {
+	t.Parallel()
 	path := newDB(t, qcTable)
 	requireSuccess(t, upsertS1(t, path, "note=a\tb\nc\\d"))
 
@@ -112,6 +115,7 @@ func TestLogEscapesTSV(t *testing.T) {
 }
 
 func TestLogJSONKeepsNullAndTextApart(t *testing.T) {
+	t.Parallel()
 	path := seeded(t)
 	requireSuccess(t, upsertS1(t, path, "note=null"))
 	requireSuccess(t, upsertS1(t, path, "--null", "note"))
@@ -138,6 +142,7 @@ func TestLogJSONKeepsNullAndTextApart(t *testing.T) {
 }
 
 func TestLogAtShowsThePastState(t *testing.T) {
+	t.Parallel()
 	path := threeWrites(t)
 	moment := between(t, path, "12", "13")
 
@@ -154,6 +159,7 @@ func TestLogAtShowsThePastState(t *testing.T) {
 }
 
 func TestLogAtBeforeEverything(t *testing.T) {
+	t.Parallel()
 	path := seeded(t)
 
 	lines := requireData(t, logS1(t, path, "--at", "2000-01-01T00:00:00Z"))
@@ -164,6 +170,7 @@ func TestLogAtBeforeEverything(t *testing.T) {
 }
 
 func TestLogAtWarnsAcrossAReconciliation(t *testing.T) {
+	t.Parallel()
 	path := seeded(t)
 	time.Sleep(5 * time.Millisecond)
 	mustExec(t, path, "UPDATE rnaseq_qc SET note = 'edited'")
@@ -184,6 +191,7 @@ func TestLogAtWarnsAcrossAReconciliation(t *testing.T) {
 }
 
 func TestLogRefusesAmbiguousMoments(t *testing.T) {
+	t.Parallel()
 	path := seeded(t)
 
 	for _, at := range []string{"2026-11-06", "ontem"} {
@@ -192,6 +200,7 @@ func TestLogRefusesAmbiguousMoments(t *testing.T) {
 }
 
 func TestLogUnknownKey(t *testing.T) {
+	t.Parallel()
 	path := seeded(t)
 
 	got := runScribo(t, "log", "--db", path, "--table", "rnaseq_qc", "--key", "sample=S9", "--key", "replicate=1")
@@ -200,6 +209,7 @@ func TestLogUnknownKey(t *testing.T) {
 }
 
 func TestLogRecordWithoutHistory(t *testing.T) {
+	t.Parallel()
 	path := seeded(t)
 	mustExec(t, path, "INSERT INTO rnaseq_qc (sample, replicate) VALUES ('S2', 1)")
 
@@ -211,6 +221,7 @@ func TestLogRecordWithoutHistory(t *testing.T) {
 }
 
 func TestLogNeverCreatesTables(t *testing.T) {
+	t.Parallel()
 	path := newDB(t, qcTable, "INSERT INTO rnaseq_qc (sample, replicate) VALUES ('S1', 1)")
 	schema := scalar(t, path, "SELECT group_concat(name || ':' || sql, ';') FROM sqlite_schema")
 
@@ -222,6 +233,7 @@ func TestLogNeverCreatesTables(t *testing.T) {
 }
 
 func TestLogRecordsNoRun(t *testing.T) {
+	t.Parallel()
 	path := threeWrites(t)
 	before := count(t, path, "tool_runs")
 
@@ -235,6 +247,7 @@ func TestLogRecordsNoRun(t *testing.T) {
 }
 
 func TestLogHelp(t *testing.T) {
+	t.Parallel()
 	got := runScribo(t, "log", "--help")
 
 	if got.ExitCode != 0 {

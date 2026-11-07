@@ -38,9 +38,7 @@ func Columns(ctx context.Context, backend db.Backend, table string, names []stri
 		return nil, err
 	}
 	if !exists {
-		return nil, exitcode.New(exitcode.Database, exitcode.CodeTableNotFound,
-			fmt.Sprintf("table %s does not exist", table),
-			"Scribo never creates a data table; create it first, for example from 'scribo schema'")
+		return nil, tableNotFound(ctx, backend, table)
 	}
 
 	columns, err := backend.Columns(ctx, table)
@@ -75,4 +73,19 @@ func CanonicalKey(columns map[string]db.Column, key db.Key) (db.Key, error) {
 		canonical[name] = converted
 	}
 	return canonical, nil
+}
+
+func tableNotFound(ctx context.Context, backend db.Backend, table string) error {
+	all, err := backend.Tables(ctx)
+	if err != nil {
+		return err
+	}
+	var data []string
+	for _, name := range all {
+		if !Reserved(name) {
+			data = append(data, name)
+		}
+	}
+	return exitcode.New(exitcode.Database, exitcode.CodeTableNotFound,
+		fmt.Sprintf("table %s does not exist", table), TableSuggestion(table, data))
 }

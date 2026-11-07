@@ -16,10 +16,14 @@ import (
 const qcTable = `CREATE TABLE rnaseq_qc (sample TEXT, replicate INTEGER, Alignment_Rate REAL,
 	Mapped_Reads INTEGER, note TEXT, run_date DATETIME, UNIQUE(sample, replicate))`
 
+func openRaw(path string) (*sql.DB, error) {
+	return sql.Open("sqlite", path+"?_busy_timeout=10000")
+}
+
 func newDB(t *testing.T, ddl ...string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "study.db")
-	handle, err := sql.Open("sqlite", path)
+	handle, err := openRaw(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,7 +38,7 @@ func newDB(t *testing.T, ddl ...string) string {
 
 func query(t *testing.T, path, statement string, args ...any) [][]string {
 	t.Helper()
-	handle, err := sql.Open("sqlite", path)
+	handle, err := openRaw(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,6 +138,7 @@ func snapshot(t *testing.T, path string, tables ...string) string {
 }
 
 func TestUpsertNewRecordWritesHistoryAndRun(t *testing.T) {
+	t.Parallel()
 	path := newDB(t, qcTable)
 
 	requireSuccess(t, upsertS1(t, path, "Alignment_Rate=94.3", "Mapped_Reads=12", "note=ok"))
@@ -160,6 +165,7 @@ func TestUpsertNewRecordWritesHistoryAndRun(t *testing.T) {
 }
 
 func TestUpsertRecordsOnlyTheFieldThatChanged(t *testing.T) {
+	t.Parallel()
 	path := seeded(t)
 
 	requireSuccess(t, upsertS1(t, path, "Alignment_Rate=94.3", "Mapped_Reads=13"))
@@ -171,6 +177,7 @@ func TestUpsertRecordsOnlyTheFieldThatChanged(t *testing.T) {
 }
 
 func TestUpsertRepeatedWriteAddsRunButNoHistory(t *testing.T) {
+	t.Parallel()
 	path := seeded(t)
 
 	requireSuccess(t, upsertS1(t, path, "Alignment_Rate=94.3", "Mapped_Reads=12", "note=ok"))
@@ -184,6 +191,7 @@ func TestUpsertRepeatedWriteAddsRunButNoHistory(t *testing.T) {
 }
 
 func TestUpsertSameNumberWrittenDifferentlyIsNoChange(t *testing.T) {
+	t.Parallel()
 	path := seeded(t)
 
 	requireSuccess(t, upsertS1(t, path, "Alignment_Rate=94.30"))
@@ -194,6 +202,7 @@ func TestUpsertSameNumberWrittenDifferentlyIsNoChange(t *testing.T) {
 }
 
 func TestUpsertKeyOrderAndNumberSpellingDoNotSplitTheRecord(t *testing.T) {
+	t.Parallel()
 	path := seeded(t)
 
 	requireSuccess(t, upsert(t, path, "--key", "replicate=01", "--key", "sample=S1", "Mapped_Reads=14"))
@@ -207,6 +216,7 @@ func TestUpsertKeyOrderAndNumberSpellingDoNotSplitTheRecord(t *testing.T) {
 }
 
 func TestUpsertNullHasItsOwnSyntax(t *testing.T) {
+	t.Parallel()
 	path := seeded(t)
 	last := "SELECT typeof(new_value), new_value, new_is_null FROM rnaseq_qc_history WHERE field = 'note' ORDER BY id DESC LIMIT 1"
 	stored := "SELECT typeof(note), ifnull(note, 'NULL') FROM rnaseq_qc"
@@ -228,6 +238,7 @@ func TestUpsertNullHasItsOwnSyntax(t *testing.T) {
 }
 
 func TestUpsertSplitsAtTheFirstEqualsAndKeepsCommas(t *testing.T) {
+	t.Parallel()
 	path := newDB(t, qcTable)
 
 	requireSuccess(t, upsert(t, path, "--key", "sample=a,b", "--key", "replicate=1", "note=a=b"))
@@ -238,6 +249,7 @@ func TestUpsertSplitsAtTheFirstEqualsAndKeepsCommas(t *testing.T) {
 }
 
 func TestUpsertKeepsDatetimeTextAndWritesItOnce(t *testing.T) {
+	t.Parallel()
 	path := newDB(t, qcTable)
 	const stamp = "2026-11-06 12:00:00"
 
@@ -256,6 +268,7 @@ func TestUpsertKeepsDatetimeTextAndWritesItOnce(t *testing.T) {
 }
 
 func TestUpsertInvalidValuesWriteNothingAtAll(t *testing.T) {
+	t.Parallel()
 	path := seeded(t)
 	tables := []string{"rnaseq_qc", "rnaseq_qc_history", "tool_runs"}
 	before := snapshot(t, path, tables...)
@@ -267,6 +280,7 @@ func TestUpsertInvalidValuesWriteNothingAtAll(t *testing.T) {
 		"Mapped_Reads=9223372036854775808",
 	} {
 		t.Run(field, func(t *testing.T) {
+			t.Parallel()
 			requireFailure(t, upsertS1(t, path, field), 3, "invalid_value")
 			if after := snapshot(t, path, tables...); after != before {
 				t.Errorf("database changed:\nbefore %s\nafter  %s", before, after)
@@ -276,6 +290,7 @@ func TestUpsertInvalidValuesWriteNothingAtAll(t *testing.T) {
 }
 
 func TestUpsertUnknownTableAndColumn(t *testing.T) {
+	t.Parallel()
 	path := seeded(t)
 
 	got := runScribo(t, "upsert", "--db", path, "--table", "nope", "--key", "sample=S1", "note=x")
@@ -289,20 +304,24 @@ func TestUpsertUnknownTableAndColumn(t *testing.T) {
 }
 
 func TestUpsertRefusesReservedTables(t *testing.T) {
+	t.Parallel()
 	path := seeded(t)
 	tables := []string{"rnaseq_qc", "rnaseq_qc_history", "tool_runs"}
 	before := snapshot(t, path, tables...)
 	schema := scalar(t, path, "SELECT group_concat(sql, ';') FROM sqlite_schema")
 
-	for _, table := range []string{
-		"tool_runs", "samples", "files", "facts", "result_inputs", "input_signals",
-		"rnaseq_qc_history", "sqlite_master", "TOOL_RUNS",
-	} {
-		t.Run(table, func(t *testing.T) {
-			got := runScribo(t, "upsert", "--db", path, "--table", table, "--key", "id=1", "x=1")
-			requireFailure(t, got, 2, "reserved_table")
-		})
-	}
+	t.Run("each table", func(t *testing.T) {
+		for _, table := range []string{
+			"tool_runs", "samples", "files", "facts", "result_inputs", "input_signals",
+			"rnaseq_qc_history", "sqlite_master", "TOOL_RUNS",
+		} {
+			t.Run(table, func(t *testing.T) {
+				t.Parallel()
+				got := runScribo(t, "upsert", "--db", path, "--table", table, "--key", "id=1", "x=1")
+				requireFailure(t, got, 2, "reserved_table")
+			})
+		}
+	})
 	if after := snapshot(t, path, tables...); after != before {
 		t.Errorf("database changed:\nbefore %s\nafter  %s", before, after)
 	}
@@ -312,6 +331,7 @@ func TestUpsertRefusesReservedTables(t *testing.T) {
 }
 
 func TestUpsertUsageErrorsAreCaughtBeforeTheDatabaseIsOpened(t *testing.T) {
+	t.Parallel()
 	path := newDB(t, qcTable)
 	db := []string{"--db", path}
 	table := []string{"--table", "rnaseq_qc"}
@@ -343,6 +363,7 @@ func TestUpsertUsageErrorsAreCaughtBeforeTheDatabaseIsOpened(t *testing.T) {
 	}
 	for name, args := range cases {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			requireFailure(t, runScribo(t, args...), 1, "usage")
 			if got := scalar(t, path, "SELECT count(*) FROM sqlite_schema WHERE name = 'tool_runs'"); got != "0" {
 				t.Error("a usage error touched the database")
@@ -352,6 +373,7 @@ func TestUpsertUsageErrorsAreCaughtBeforeTheDatabaseIsOpened(t *testing.T) {
 }
 
 func TestUpsertModesRecordTheFailedRun(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		flag string
@@ -362,6 +384,7 @@ func TestUpsertModesRecordTheFailedRun(t *testing.T) {
 	}
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			path := seeded(t)
 			args := []string{tt.flag, "Mapped_Reads=99"}
 			if tt.flag == "--update-only" {
@@ -395,20 +418,8 @@ func requireOneFailedRun(t *testing.T, path string, before int) {
 	}
 }
 
-func TestUpsertAmbiguousKeyChangesNothing(t *testing.T) {
-	path := newDB(t, `CREATE TABLE rnaseq_qc (sample TEXT, replicate INTEGER, note TEXT)`,
-		`INSERT INTO rnaseq_qc VALUES ('S1', 1, 'a')`, `INSERT INTO rnaseq_qc VALUES ('S1', 1, 'a')`)
-	before := snapshot(t, path, "rnaseq_qc")
-
-	requireFailure(t, upsertS1(t, path, "note=b"), 3, "ambiguous_key")
-
-	if after := snapshot(t, path, "rnaseq_qc"); after != before {
-		t.Errorf("data changed:\nbefore %s\nafter  %s", before, after)
-	}
-	requireOneFailedRun(t, path, 0)
-}
-
 func TestUpsertConstraintFailureIsTypedAndRecorded(t *testing.T) {
+	t.Parallel()
 	path := newDB(t, `CREATE TABLE rnaseq_qc (sample TEXT, replicate INTEGER, x TEXT NOT NULL, y INTEGER, UNIQUE(sample, replicate))`)
 
 	requireFailure(t, upsertS1(t, path, "y=1"), 3, "constraint_failed")
@@ -420,6 +431,7 @@ func TestUpsertConstraintFailureIsTypedAndRecorded(t *testing.T) {
 }
 
 func TestUpsertIsAtomicWhenTheHistoryWriteFails(t *testing.T) {
+	t.Parallel()
 	path := seeded(t)
 	if _, err := execRaw(path, `CREATE TRIGGER boom AFTER INSERT ON rnaseq_qc_history BEGIN SELECT RAISE(ABORT, 'boom'); END`); err != nil {
 		t.Fatal(err)
@@ -439,7 +451,7 @@ func TestUpsertIsAtomicWhenTheHistoryWriteFails(t *testing.T) {
 }
 
 func execRaw(path string, statement string) (sql.Result, error) {
-	handle, err := sql.Open("sqlite", path)
+	handle, err := openRaw(path)
 	if err != nil {
 		return nil, err
 	}
@@ -448,6 +460,7 @@ func execRaw(path string, statement string) (sql.Result, error) {
 }
 
 func TestUpsertWorksOnStrictTables(t *testing.T) {
+	t.Parallel()
 	path := newDB(t, `CREATE TABLE rnaseq_qc (sample TEXT, replicate INTEGER, n INTEGER, r REAL, UNIQUE(sample, replicate)) STRICT`)
 
 	requireSuccess(t, upsertS1(t, path, "n=5", "r=3"))
@@ -458,6 +471,7 @@ func TestUpsertWorksOnStrictTables(t *testing.T) {
 }
 
 func TestUpsertReportsALockedDatabase(t *testing.T) {
+	t.Parallel()
 	path := seeded(t)
 	holder, err := sql.Open("sqlite", path)
 	if err != nil {
@@ -491,6 +505,7 @@ func TestUpsertReportsALockedDatabase(t *testing.T) {
 }
 
 func TestUpsertLeaksNothingFromItsArguments(t *testing.T) {
+	t.Parallel()
 	const sentinel = "LEAK-7f3a9c"
 	dir := filepath.Join(t.TempDir(), sentinel)
 	if err := os.Mkdir(dir, 0o700); err != nil {
@@ -517,6 +532,7 @@ func TestUpsertLeaksNothingFromItsArguments(t *testing.T) {
 }
 
 func TestUpsertHelp(t *testing.T) {
+	t.Parallel()
 	got := runScribo(t, "upsert", "--help")
 
 	if got.ExitCode != 0 {

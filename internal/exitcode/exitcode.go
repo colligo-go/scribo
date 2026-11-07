@@ -32,6 +32,23 @@ const (
 	CodeKeyAlreadyExists   = "key_already_exists"
 	CodeHistoryReconciled  = "history_reconciled"
 	CodeHistoryApproximate = "history_approximate"
+	CodeKeyMismatch        = "key_mismatch"
+	CodeNoUniqueKey        = "no_unique_key"
+	CodeInterrupted        = "interrupted"
+	CodeUntypedComparison  = "untyped_comparison"
+	CodeUnknownSample      = "unknown_sample"
+	CodeInputNotFound      = "input_not_found"
+	CodeInvalidRules       = "invalid_rules"
+	CodeInvariantViolated  = "invariant_violated"
+	CodeRuleUnavailable    = "rule_unavailable"
+	CodeColligoRequired    = "colligo_required"
+	CodeStaleResults       = "stale_results"
+	CodeNondeterministic   = "nondeterministic_change"
+	CodeInvalidFormat      = "invalid_format"
+	CodeBatchFailed        = "batch_failed"
+	CodeSyncedPath         = "synced_path"
+	CodeRunNotFound        = "run_not_found"
+	CodeToolVersionUnknown = "tool_version_unknown"
 )
 
 type Error struct {

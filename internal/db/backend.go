@@ -122,6 +122,11 @@ type Backend interface {
 
 	TableExists(ctx context.Context, table string) (bool, error)
 
+	// Tables lists the names of every table of the database, in alphabetical
+	// order, without SQLite's own sqlite_ tables. Telling a data table from
+	// one that Scribo or Colligo owns is the caller's job.
+	Tables(ctx context.Context) ([]string, error)
+
 	// Columns lists the columns of a table in declaration order.
 	Columns(ctx context.Context, table string) ([]Column, error)
 
@@ -132,6 +137,14 @@ type Backend interface {
 	// EnsureHistoryTable creates {table}_history and its indexes, and checks
 	// an existing one against the DDL of SPEC §4.
 	EnsureHistoryTable(ctx context.Context, table string) error
+
+	// UniqueKeys lists the column sets that identify one row of the table:
+	// each UNIQUE constraint, each non-partial UNIQUE index over plain
+	// columns, and the PRIMARY KEY (an INTEGER PRIMARY KEY included). Column
+	// names carry the spelling of the table, each set and the list are
+	// sorted, and no set repeats. A table with no unique key gives an empty
+	// list.
+	UniqueKeys(ctx context.Context, table string) ([][]string, error)
 
 	// BeginTx opens a BEGIN IMMEDIATE transaction. While it is open every
 	// other Backend method returns an internal error: the pool holds one
