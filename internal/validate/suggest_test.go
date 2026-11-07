@@ -61,3 +61,32 @@ func TestReservedTables(t *testing.T) {
 		}
 	}
 }
+
+func TestSuggestionByPrefix(t *testing.T) {
+	tests := []struct {
+		name       string
+		candidates []string
+		want       string
+	}{
+		{"rnaseq", []string{"rnaseq_qc", "star_qc"}, `did you mean "rnaseq_qc"?`},
+		{"RNASEQ", []string{"rnaseq_qc"}, `did you mean "rnaseq_qc"?`},
+		{"rnaseq", []string{"rnaseq_qc", "rnaseq_counts"}, "columns: rnaseq_counts, rnaseq_qc"},
+		{"Align", []string{"Alignment_Rate", "Mapped_Reads"}, `did you mean "Alignment_Rate"?`},
+		{"rnaseqqc", []string{"rnaseq_qc", "rnaseq_q"}, `did you mean "rnaseq_qc"?`},
+		{"zzz", []string{"a", "b"}, "columns: a, b"},
+		{"", []string{"abcdef"}, "columns: abcdef"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name+" in "+strings.Join(tt.candidates, ","), func(t *testing.T) {
+			if got := Suggestion(tt.name, tt.candidates); got != tt.want {
+				t.Errorf("Suggestion(%q) = %q, want %q", tt.name, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTableSuggestionByPrefix(t *testing.T) {
+	if got := TableSuggestion("rnaseq", []string{"rnaseq_qc", "star_qc"}); got != `did you mean "rnaseq_qc"?` {
+		t.Errorf("got %q", got)
+	}
+}

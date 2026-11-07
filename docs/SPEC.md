@@ -339,7 +339,7 @@ Validation outside the transaction. State and write inside.
 1.  validate flags                                   error → exit 1
 2.  open Backend (§3)                                error → exit 5
 3.  TableExists                                      false → exit 2, table_not_found
-4.  Columns; validate that every field exists        missing → exit 2, column_not_found, suggestion by edit distance
+4.  Columns; validate that every field exists        missing → exit 2, column_not_found, suggestion (§10)
     and that the key is a unique key (§4)             otherwise → exit 2, key_mismatch or no_unique_key
 5.  coerce values according to affinity              failure → exit 3, invalid_value
 6.  resolve --sample, if any                         failure → exit 3, unknown_sample
@@ -499,7 +499,7 @@ Exit code 0 if nothing is stale, 3 if there are stale items.
 
 `scribo help exit-codes` prints the table of §12 with one line of meaning per code, for whoever writes a pipeline around Scribo. It is generated from one registry, `exitcode.Codes`, and a test keeps that registry and the `Typed codes:` list of §12 identical. `--version` prints `scribo <version> (commit <sha>, <go version>)` on stdout.
 
-A missing table is answered like a missing column: `table_not_found` with `did you mean "rnaseq_qc"?` when a table is within edit distance 2, or the list of data tables (reserved ones left out, at most 20) otherwise, or `the database has no data table yet` when there is none. `Backend.Tables` lists every table; the command layer leaves out the reserved ones. The context of an error never names a command that does not exist yet.
+A missing column or table gets a suggestion, compared without regard to case: `did you mean "rnaseq_qc"?` for the closest name within edit distance 2 (a tie goes to the alphabetically first); failing that, for the one name the given text is a prefix of (`rnaseq` → `rnaseq_qc`, but not when it is a prefix of two or more); otherwise the list of names, at most 20. A missing column is `column_not_found` with the columns of the table. A missing table is `table_not_found` with the list of data tables (reserved ones left out, at most 20), or `the database has no data table yet` when there is none. `Backend.Tables` lists every table; the command layer leaves out the reserved ones. The context of an error never names a command that does not exist yet.
 
 ### upsert
 

@@ -34,6 +34,9 @@ func suggestFrom(label, name string, candidates []string) string {
 			best, bestDistance = candidate, distance
 		}
 	}
+	if best == "" {
+		best = onlyPrefixMatch(name, sorted)
+	}
 	if best != "" {
 		return fmt.Sprintf("did you mean %q?", best)
 	}
@@ -42,6 +45,24 @@ func suggestFrom(label, name string, candidates []string) string {
 		sorted = sorted[:maxListedColumns]
 	}
 	return label + ": " + strings.Join(sorted, ", ")
+}
+
+func onlyPrefixMatch(name string, candidates []string) string {
+	if name == "" {
+		return ""
+	}
+	prefix := strings.ToLower(name)
+	match := ""
+	for _, candidate := range candidates {
+		if !strings.HasPrefix(strings.ToLower(candidate), prefix) {
+			continue
+		}
+		if match != "" {
+			return ""
+		}
+		match = candidate
+	}
+	return match
 }
 
 func editDistance(a, b string) int {
