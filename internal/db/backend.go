@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"database/sql"
 	"time"
 
 	"github.com/colligo-go/scribo/internal/exitcode"
@@ -36,6 +37,15 @@ type HistoryRow struct {
 	ChangedAt string
 	Old       Value
 	New       Value
+}
+
+// RunInfo is what log --with-runs shows of the run that wrote a history
+// row. Step is empty when the run had none; ExitCode is not valid while the
+// run is still open or was interrupted before it closed.
+type RunInfo struct {
+	ToolVersion string
+	Step        string
+	ExitCode    sql.NullInt64
 }
 
 // WriteMode says what an upsert may do when the record does or does not exist.
@@ -169,6 +179,16 @@ type Backend interface {
 	// It reads outside any transaction, so its answer must never feed the
 	// history; only Tx.SelectRow does that.
 	RecordExists(ctx context.Context, table string, key Key) (bool, error)
+
+	// Runs returns the tool_runs details of the given run ids. An id with no
+	// row is absent from the map.
+	Runs(ctx context.Context, ids []int64) (map[int64]RunInfo, error)
+
+	// LastRowOfRun returns the last history row, in (changed_at, id) order,
+	// that run runID wrote to {table}_history, whatever the record. The
+	// boolean is false when the run wrote nothing there, or the table has no
+	// history yet.
+	LastRowOfRun(ctx context.Context, table string, runID int64) (HistoryRow, bool, error)
 
 	// BeginRun records the start of an execution in tool_runs and returns
 	// its id. The row is committed at once, so it survives a failed write.

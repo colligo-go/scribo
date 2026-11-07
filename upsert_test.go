@@ -450,13 +450,13 @@ func TestUpsertIsAtomicWhenTheHistoryWriteFails(t *testing.T) {
 	requireOneFailedRun(t, path, 1)
 }
 
-func execRaw(path string, statement string) (sql.Result, error) {
+func execRaw(path string, statement string, args ...any) (sql.Result, error) {
 	handle, err := openRaw(path)
 	if err != nil {
 		return nil, err
 	}
 	defer handle.Close()
-	return handle.Exec(statement)
+	return handle.Exec(statement, args...)
 }
 
 func TestUpsertWorksOnStrictTables(t *testing.T) {

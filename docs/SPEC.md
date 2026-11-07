@@ -100,6 +100,8 @@ type Backend interface {
     HistoryBetween(ctx context.Context, table string, runA, runB int64) ([]HistoryRow, error)
     HistoryOf(ctx context.Context, table, recordKey, field string) ([]HistoryRow, error)
     RecordExists(ctx context.Context, table string, key Key) (bool, error)
+    Runs(ctx context.Context, ids []int64) (map[int64]RunInfo, error)
+    LastRowOfRun(ctx context.Context, table string, runID int64) (HistoryRow, bool, error)
 
     BeginTx(ctx context.Context) (Tx, error)
 }
@@ -120,7 +122,7 @@ type Tx interface {
 
 `SelectRows` serves `query` and `export`: it reads outside any transaction and never feeds the history. Columns are read as `+"column"`, like `SelectRow`, and rendered as in §7. The predicates are joined by AND; `OpIsNull` and `OpNotNull` are `IS NULL` and `IS NOT NULL`, `OpNe` is `IS NOT ?` (so a NULL is kept: `!=` is the complement of `=`), and a predicate with `AsText` compares `CAST("column" AS TEXT)` with the value as text. Otherwise the value is bound as in `Coerce`: a number for a numeric column, text for any other. Records are ordered by the columns of the first unique key (§4) and then by `rowid` when the table has one, so the order is the same on every read; `limit` greater than zero adds `LIMIT`.
 
-`HistoryOf` and `RecordExists` serve `log` and never feed the history: they read outside any transaction. `HistoryOf` on a table without `{table}_history` returns no rows and creates nothing.
+`HistoryOf`, `RecordExists`, `Runs` and `LastRowOfRun` serve `log` and never feed the history: they read outside any transaction. `HistoryOf` on a table without `{table}_history` returns no rows and creates nothing.
 
 While a `Tx` is open, every method of the `Backend` returns an `internal` error, because the pool holds one connection and the call would otherwise wait for ever. Every identifier that comes from the user is quoted with `quoteIdent` (double quotes, an embedded quote doubled); values always go as `?` parameters.
 
@@ -257,6 +259,12 @@ type HistoryRow struct {
     ChangedAt string
     Old       Value
     New       Value
+}
+
+type RunInfo struct {
+    ToolVersion string
+    Step        string
+    ExitCode    sql.NullInt64
 }
 
 type Row  map[string]Value
@@ -558,11 +566,11 @@ With `--at`, the state at that moment: TSV `field  value  is_null`, one line per
 
 A key with no history: `key_not_found` (exit 3) when no record has it, an empty result (header only, exit 0) when the record exists but was never written by Scribo. `log` writes nothing: no `tool_runs` row, no contract or history table created.
 
-Planned for Slice 2:
+`--format pretty` shows the rows of the TSV form in aligned columns, without the `is_null` columns and with a NULL as `∅`; with `--at`, the columns `field` and `value`. It is chosen explicitly, never by detecting a terminal: the output of a command does not change with where it is written.
 
-- `--format pretty`: the same rows as TSV in aligned columns, with `NULL` shown as `∅` and without the `is_null` columns, for a person at a terminal. It is chosen explicitly, never by detecting a terminal: the output of a command does not change with where it is written.
-- `--with-runs`: adds `tool_version`, `step` and `exit_code` of the run that wrote each row, from `tool_runs`.
-- `--at run:N`: the state right after the last history row that run `N` wrote in this table, every row up to it in `(changed_at, id)` order. A run that wrote nothing in this table → `run_not_found`, exit 3. Run ids are not used as an order by themselves: two runs may start in one order and commit in the other.
+`--with-runs` adds `tool_version`, `step` and `exit_code` of the run that wrote each row, read from `tool_runs`, to the history form in every format. `step` is empty when the run had none; `exit_code` is an empty cell in TSV, `null` in JSON and `∅` in `pretty` while the run is open or after it was killed. It does not apply to `--at`: with `--at` it is a usage error.
+
+`--at run:N` shows the state right after the last history row that run `N` wrote in this table, to any record: every row of the record up to that one in `(changed_at, id)` order, so two runs that share a `changed_at` are told apart by `id`. `N` must be an integer greater than zero (usage error otherwise). A run that wrote nothing in this table → `run_not_found`, exit 3, `run 7 wrote nothing to rnaseq_qc`. Run ids are not used as an order by themselves: two runs may start in one order and commit in the other. The approximate fields are found as with a timestamp.
 
 ### query, export
 
