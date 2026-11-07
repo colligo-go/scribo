@@ -551,11 +551,13 @@ Planned for Slice 2:
 ### query, export
 
 ```
-scribo query  --db DB --table T [--where COND]... [--fields F1,F2] [--format tsv|json|csv] [--limit N] [--with-staleness]
-scribo export --db DB --table T [--where COND]... [--out PATH] [--format tsv|json|csv] [--with-staleness]
+scribo query  --db DB --table T [--where COND]... [--is-null F]... [--not-null F]... [--fields F1,F2] [--format tsv|json|csv|pretty] [--limit N] [--force-text] [--with-staleness]
+scribo export --db DB --table T [--where COND]... [--is-null F]... [--not-null F]... [--out PATH] [--overwrite] [--format tsv|json|csv] [--force-text] [--with-staleness]
 ```
 
-`--with-staleness` adds the `_stale` column computed from the graph.
+`--where COND` is `FIELD<op>VALUE` with one of `=`, `!=`, `>`, `<`, `>=`, `<=`; repeatable. `null` in a value is the text `null`, never NULL: a real NULL is filtered with `--is-null FIELD` and `--not-null FIELD`, both repeatable. Every filter is joined by AND.
+
+`--with-staleness` adds the `_stale` column computed from the graph (Slice 3).
 
 ### schema
 
