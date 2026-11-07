@@ -13,6 +13,7 @@ import (
 	"github.com/colligo-go/scribo/internal/db"
 	"github.com/colligo-go/scribo/internal/db/sqlite"
 	"github.com/colligo-go/scribo/internal/exitcode"
+	"github.com/colligo-go/scribo/internal/format"
 	"github.com/colligo-go/scribo/internal/reader"
 	"github.com/spf13/cobra"
 )
@@ -29,8 +30,6 @@ const logExamples = `  # every change of one record, oldest first
       --field Mapped_Reads --format json`
 
 const timestampLayout = "2006-01-02T15:04:05.000Z"
-
-var tsvEscaper = strings.NewReplacer(`\`, `\\`, "\t", `\t`, "\n", `\n`, "\r", `\r`)
 
 func newLogCommand(options *globalOptions) *cobra.Command {
 	var keys []string
@@ -134,7 +133,7 @@ func tsvCell(value db.Value) (string, string) {
 	if value.IsNull {
 		return "", "1"
 	}
-	return tsvEscaper.Replace(value.Raw), "0"
+	return format.Escape(value.Raw), "0"
 }
 
 func writeHistoryTSV(out *bytes.Buffer, rows []db.HistoryRow) {
@@ -143,7 +142,7 @@ func writeHistoryTSV(out *bytes.Buffer, rows []db.HistoryRow) {
 		oldValue, oldIsNull := tsvCell(row.Old)
 		newValue, newIsNull := tsvCell(row.New)
 		cells := []string{
-			row.ChangedAt, strconv.FormatInt(row.RunID, 10), row.Source, tsvEscaper.Replace(row.Field),
+			row.ChangedAt, strconv.FormatInt(row.RunID, 10), row.Source, format.Escape(row.Field),
 			oldValue, oldIsNull, newValue, newIsNull,
 		}
 		out.WriteString(strings.Join(cells, "\t") + "\n")
@@ -154,7 +153,7 @@ func writeStateTSV(out *bytes.Buffer, state db.Row) {
 	out.WriteString("field\tvalue\tis_null\n")
 	for _, name := range sortedFields(state) {
 		value, isNull := tsvCell(state[name])
-		out.WriteString(tsvEscaper.Replace(name) + "\t" + value + "\t" + isNull + "\n")
+		out.WriteString(format.Escape(name) + "\t" + value + "\t" + isNull + "\n")
 	}
 }
 

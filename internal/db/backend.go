@@ -146,6 +146,14 @@ type Backend interface {
 	// list.
 	UniqueKeys(ctx context.Context, table string) ([][]string, error)
 
+	// SelectRows reads the given fields of every record that matches all
+	// the predicates, at most limit records when limit is greater than
+	// zero. Records come ordered by the columns of the table's first unique
+	// key, or by rowid when it has none, so two reads of the same data give
+	// the same order. Values are rendered like the history's. It reads
+	// outside any transaction and never feeds the history.
+	SelectRows(ctx context.Context, table string, where []Predicate, fields []string, limit int) (Rows, error)
+
 	// BeginTx opens a BEGIN IMMEDIATE transaction. While it is open every
 	// other Backend method returns an internal error: the pool holds one
 	// connection and the call would wait for ever.

@@ -91,7 +91,7 @@ type Backend interface {
     BeginRun(ctx context.Context, meta RunMeta) (int64, error)
     EndRun(ctx context.Context, runID int64, exitCode int) error
 
-    SelectRows(ctx context.Context, table string, where []Predicate, fields []string) (Rows, error)
+    SelectRows(ctx context.Context, table string, where []Predicate, fields []string, limit int) (Rows, error)
     ResolveSample(ctx context.Context, ref string) (Sample, error)
     FileRoot(ctx context.Context, path string) (string, bool, error)
     InputFacts(ctx context.Context, roots []string) (InputFacts, error)
@@ -117,6 +117,8 @@ type Tx interface {
 ```
 
 `SelectRow` returns `false` when no record matches the key and an `ambiguous_key` error (exit 3) when two or more do: the key columns must be `UNIQUE`. It matches with `IS`, so a NULL key value matches a NULL, and it reads every column as `+"column"`: the unary plus gives the expression no declared type, so the driver does not turn the text of a `DATE`, `DATETIME` or `TIMESTAMP` column into a `time.Time` that would no longer read back as the same text. `Upsert` reads the record, writes with `INSERT` or `UPDATE`, reads it again and reports the fields whose stored text differs, ordered by field name; a record that did not exist has a NULL old value for every field. `Rollback` after `Commit` returns nil so that `defer tx.Rollback()` is safe.
+
+`SelectRows` serves `query` and `export`: it reads outside any transaction and never feeds the history. Columns are read as `+"column"`, like `SelectRow`, and rendered as in §7. The predicates are joined by AND; `OpIsNull` and `OpNotNull` are `IS NULL` and `IS NOT NULL`, `OpNe` is `IS NOT ?` (so a NULL is kept: `!=` is the complement of `=`), and a predicate with `AsText` compares `CAST("column" AS TEXT)` with the value as text. Otherwise the value is bound as in `Coerce`: a number for a numeric column, text for any other. Records are ordered by the columns of the first unique key (§4) and then by `rowid` when the table has one, so the order is the same on every read; `limit` greater than zero adds `LIMIT`.
 
 `HistoryOf` and `RecordExists` serve `log` and never feed the history: they read outside any transaction. `HistoryOf` on a table without `{table}_history` returns no rows and creates nothing.
 
@@ -168,10 +170,24 @@ type Value struct {
     IsNull bool
 }
 
+type Op int
+
+const (
+    OpEq Op = iota
+    OpNe
+    OpLt
+    OpLe
+    OpGt
+    OpGe
+    OpIsNull
+    OpNotNull
+)
+
 type Predicate struct {
-    Field string
-    Op    string
-    Value Value
+    Field  string
+    Op     Op
+    Value  Value
+    AsText bool
 }
 
 type FieldChange struct {
@@ -420,7 +436,7 @@ There is no magic value: a typed `null` is text. A real NULL only through `--nul
 
 An `INTEGER` column never gets a suggestion it would refuse itself: a `%` or grouping hint whose value has a decimal point drops the value (`drop the % sign`), and the two comma hints are not given at all.
 
-**Comparison.** `>`, `<`, `>=`, `<=` against a column with `Declared=false` or textual affinity → `untyped_comparison`, exit 2, suggesting `--force-text`.
+**Comparison.** A filter uses the definition of a numeric column of coercion above. On a numeric column the value must be a number (`invalid_value`, exit 3, with the hints for a refused number) and is compared as a number, so `100 > 90`. On any other column `=` and `!=` compare the exact text, and `>`, `<`, `>=`, `<=` → `untyped_comparison`, exit 2: `run_date is not a numeric column; > would compare text`, suggesting `--force-text`. `--force-text` compares every filter as text, `CAST("column" AS TEXT)`, numeric columns included.
 
 ---
 
@@ -557,6 +573,19 @@ scribo export --db DB --table T [--where COND]... [--is-null F]... [--not-null F
 
 `--where COND` is `FIELD<op>VALUE` with one of `=`, `!=`, `>`, `<`, `>=`, `<=`; repeatable. `null` in a value is the text `null`, never NULL: a real NULL is filtered with `--is-null FIELD` and `--not-null FIELD`, both repeatable. Every filter is joined by AND.
 
+`--fields` takes comma-separated names, repeatable, printed in the order given; a name given twice is a usage error. Without it, every column in table order. `--limit N` needs `N > 0`. Records come in the order of `SelectRows` (§2): the first unique key, then `rowid`.
+
+Formats:
+
+- `tsv` (the default): a header with the names, a NULL as `\N`, and `\`, tab, LF and CR escaped as `\\`, `\t`, `\n`, `\r`, the escaping of `log`; a literal text `\N` is written `\\N`.
+- `csv`: RFC 4180, written by hand because `encoding/csv` cannot quote an empty text. A field holding `,`, `"`, CR or LF is quoted with `"` doubled; the empty text is `""`; a NULL is an empty unquoted field. Lines end in LF.
+- `json`: one object per line, keys in column order, values as strings or `null`, no HTML escaping.
+- `pretty` (`query` only): aligned columns with a line of dashes under the header, a NULL as `∅`, control characters escaped as in `tsv`. Column width counts characters, not bytes.
+
+`export` writes to stdout, or to `--out PATH`. An existing `PATH` without `--overwrite` → `file_exists`, exit 4, before the database is opened. The file is written to a temporary file in the same directory, synced, closed and renamed over `PATH`, so a failure leaves `PATH` as it was and removes the temporary file; an overwritten file keeps its permissions and a new one gets `0644`. `export` has no `--limit` nor `pretty`.
+
+`query` and `export` never write: no `tool_runs` row, no table created. A reserved or missing table gets the errors of `upsert`.
+
 `--with-staleness` adds the `_stale` column computed from the graph (Slice 3).
 
 ### schema
@@ -654,9 +683,9 @@ ERROR [<typed_code>]: <main message>
 → <context, line of the error, suggestion>
 ```
 
-Typed codes: `table_not_found`, `column_not_found`, `key_not_found`, `key_already_exists`, `invalid_value`, `untyped_comparison`, `unknown_sample`, `input_not_found`, `invalid_rules`, `invariant_violated`, `rule_unavailable`, `colligo_required`, `contract_mismatch`, `stale_results`, `nondeterministic_change`, `file_not_found`, `invalid_format`, `batch_failed`, `db_busy`, `permission_denied`, `synced_path`, `pragma_ineffective`, `usage`, `internal`, `io_error`, `network_filesystem`, `constraint_failed`, `reserved_table`, `ambiguous_key`, `history_reconciled`, `history_approximate`, `key_mismatch`, `no_unique_key`, `interrupted`, `run_not_found`, `tool_version_unknown`.
+Typed codes: `table_not_found`, `column_not_found`, `key_not_found`, `key_already_exists`, `invalid_value`, `untyped_comparison`, `unknown_sample`, `input_not_found`, `invalid_rules`, `invariant_violated`, `rule_unavailable`, `colligo_required`, `contract_mismatch`, `stale_results`, `nondeterministic_change`, `file_not_found`, `invalid_format`, `batch_failed`, `db_busy`, `permission_denied`, `synced_path`, `pragma_ineffective`, `usage`, `internal`, `io_error`, `network_filesystem`, `constraint_failed`, `reserved_table`, `ambiguous_key`, `history_reconciled`, `history_approximate`, `key_mismatch`, `no_unique_key`, `interrupted`, `run_not_found`, `tool_version_unknown`, `file_exists`.
 
-New in Slice 2: `key_mismatch` and `no_unique_key` (the key is not exactly one unique key of the table, §4; exit 2), `interrupted` (a signal ended the command, §5; exit 5), `run_not_found` (`log --at run:N` for a run that wrote nothing in the table; exit 3) and the warning `tool_version_unknown` (§10, ingest).
+New in Slice 2: `key_mismatch` and `no_unique_key` (the key is not exactly one unique key of the table, §4; exit 2), `interrupted` (a signal ended the command, §5; exit 5), `run_not_found` (`log --at run:N` for a run that wrote nothing in the table; exit 3) the warning `tool_version_unknown` (§10, ingest) and `file_exists` (`export --out` to a file that exists, without `--overwrite`; exit 4).
 
 New in Slice 1: `constraint_failed` (the database refused a value: NOT NULL, UNIQUE, CHECK or a trigger; exit 3), `reserved_table` (the table is one Scribo or Colligo owns, or a `_history` or `sqlite_` table; exit 2), `ambiguous_key` (a key matches more than one record because its columns are not UNIQUE; exit 3), `io_error` (a database error with no more specific code, exit 5) and the warnings `network_filesystem`, `history_reconciled` and `history_approximate` (§6), which never change the exit status.
 

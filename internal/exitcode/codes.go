@@ -46,6 +46,7 @@ var Codes = []CodeInfo{
 	{CodeInvalidRules, File, "scribo.rules.toml cannot be read or parsed"},
 	{CodeFileNotFound, File, "the database or another file does not exist"},
 	{CodeInvalidFormat, File, "the file is not in the expected format"},
+	{CodeFileExists, File, "the output file exists and --overwrite was not given"},
 	{CodeBatchFailed, File, "a line of the batch failed; nothing was written"},
 	{CodeDBBusy, System, "another process holds the write lock"},
 	{CodePermissionDenied, System, "the file cannot be read or written"},

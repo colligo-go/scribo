@@ -172,6 +172,8 @@ Chronological ordering is always `(changed_at, id)`.
 
 `null` in a value is always the text `null`. A real NULL is filtered with `--is-null FIELD` and `--not-null FIELD`, both repeatable and joined by the same AND. On `upsert`, `FIELD=null` stores the text `null` (NULL has its own syntax); reading `--where FIELD=null` as "is NULL" would give the same spelling two opposite meanings, and would hide the rows that hold the text `null`.
 
+`!=` is the complement of `=`: a field that is NULL is not equal to `x`, so `--where note!=x` keeps it. SQL's own `!=` would drop it in silence, and the rows a filter leaves out should be the ones it names.
+
 ### JSON is JSONL
 
 `query`, `export` and `diff` produce TSV by default; `--format json` produces one object per line.
