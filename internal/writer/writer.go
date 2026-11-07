@@ -38,6 +38,13 @@ func Upsert(ctx context.Context, backend db.Backend, req Request, warn func(exit
 	if err != nil {
 		return err
 	}
+	uniqueKeys, err := backend.UniqueKeys(ctx, req.Table)
+	if err != nil {
+		return err
+	}
+	if err := validate.Key(req.Table, uniqueKeys, req.Key); err != nil {
+		return err
+	}
 	canonicalKey, err := validate.CanonicalKey(byName, req.Key)
 	if err != nil {
 		return err

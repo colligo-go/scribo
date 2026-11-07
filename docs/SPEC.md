@@ -83,6 +83,7 @@ type Backend interface {
     ColligoPresent(ctx context.Context) (bool, error)
 
     TableExists(ctx context.Context, table string) (bool, error)
+    UniqueKeys(ctx context.Context, table string) ([][]string, error)
     Columns(ctx context.Context, table string) ([]Column, error)
     EnsureContractTables(ctx context.Context) error
     EnsureHistoryTable(ctx context.Context, table string) error
@@ -320,9 +321,9 @@ Injectivity is checked by a native fuzz test (`FuzzRecordKey`): every accepted k
 
 ### The key is a unique key of the table
 
-The fields given as the key must be exactly the columns of one `UNIQUE` constraint or of the `PRIMARY KEY` of the data table (an `INTEGER PRIMARY KEY` counts), compared by name: no column missing, none extra.
+The fields given as the key must be exactly the columns of one unique key of the data table, compared by name without regard to case: no column missing, none extra. A unique key is a `UNIQUE` constraint, a non-partial `UNIQUE` index whose columns are plain columns, or the `PRIMARY KEY` (an `INTEGER PRIMARY KEY` counts). A partial index does not guarantee uniqueness over the whole table and an index on an expression names no column, so neither is one.
 
-- A key that is not exactly one of them → `key_mismatch`, exit 2, naming the table's unique keys and what is missing or extra: `the key of rnaseq_qc is (sample, replicate); replicate is missing`.
+- A key that is not exactly one of them → `key_mismatch`, exit 2, naming the closest unique key of the table (the one with the smallest symmetric difference; a tie goes to the first) and what is missing or extra, with its columns in alphabetical order: `the key of rnaseq_qc is (replicate, sample); replicate is missing`. With more than one unique key, the context lists them all: `unique keys: (id); (replicate, sample)`.
 - A table with no `UNIQUE` constraint and no `PRIMARY KEY` → `no_unique_key`, exit 2, suggesting one.
 
 Why: one row must have one `record_key`. A partial key (`sample` alone when the key is `sample, replicate`) still finds the row when only one matches, so the write succeeds, but its history goes under a second `record_key`; the record's history splits, and the next write with the full key reconciles a change that Scribo itself made. The rule holds for every command that takes `--key`: `upsert` and `log` in Slice 1, and every later one. `ambiguous_key` stays as a defence that this rule makes unreachable.

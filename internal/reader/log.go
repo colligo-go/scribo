@@ -44,6 +44,13 @@ func Log(ctx context.Context, backend db.Backend, req LogRequest, warn func(exit
 	if err != nil {
 		return LogResult{}, err
 	}
+	uniqueKeys, err := backend.UniqueKeys(ctx, req.Table)
+	if err != nil {
+		return LogResult{}, err
+	}
+	if err := validate.Key(req.Table, uniqueKeys, req.Key); err != nil {
+		return LogResult{}, err
+	}
 	key, err := validate.CanonicalKey(columns, req.Key)
 	if err != nil {
 		return LogResult{}, err

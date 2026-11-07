@@ -32,6 +32,8 @@ const (
 	CodeKeyAlreadyExists   = "key_already_exists"
 	CodeHistoryReconciled  = "history_reconciled"
 	CodeHistoryApproximate = "history_approximate"
+	CodeKeyMismatch        = "key_mismatch"
+	CodeNoUniqueKey        = "no_unique_key"
 )
 
 type Error struct {

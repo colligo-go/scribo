@@ -395,19 +395,6 @@ func requireOneFailedRun(t *testing.T, path string, before int) {
 	}
 }
 
-func TestUpsertAmbiguousKeyChangesNothing(t *testing.T) {
-	path := newDB(t, `CREATE TABLE rnaseq_qc (sample TEXT, replicate INTEGER, note TEXT)`,
-		`INSERT INTO rnaseq_qc VALUES ('S1', 1, 'a')`, `INSERT INTO rnaseq_qc VALUES ('S1', 1, 'a')`)
-	before := snapshot(t, path, "rnaseq_qc")
-
-	requireFailure(t, upsertS1(t, path, "note=b"), 3, "ambiguous_key")
-
-	if after := snapshot(t, path, "rnaseq_qc"); after != before {
-		t.Errorf("data changed:\nbefore %s\nafter  %s", before, after)
-	}
-	requireOneFailedRun(t, path, 0)
-}
-
 func TestUpsertConstraintFailureIsTypedAndRecorded(t *testing.T) {
 	path := newDB(t, `CREATE TABLE rnaseq_qc (sample TEXT, replicate INTEGER, x TEXT NOT NULL, y INTEGER, UNIQUE(sample, replicate))`)
 
