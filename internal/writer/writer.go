@@ -26,6 +26,10 @@ type Request struct {
 }
 
 func Upsert(ctx context.Context, backend db.Backend, req Request, warn func(exitcode.Warning)) error {
+	return run.Interrupted(ctx, upsert(ctx, backend, req, warn))
+}
+
+func upsert(ctx context.Context, backend db.Backend, req Request, warn func(exitcode.Warning)) error {
 	if err := backend.Open(ctx, req.DB, db.OpenOptions{BusyTimeout: req.BusyTimeout}); err != nil {
 		return err
 	}
@@ -66,13 +70,19 @@ func Upsert(ctx context.Context, backend db.Backend, req Request, warn func(exit
 		return err
 	}
 
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	runID, err := backend.BeginRun(ctx, run.Meta(req.ArgvShape, ""))
 	if err != nil {
 		return err
 	}
-	writeErr := write(ctx, backend, req, byName, canonicalKey, recordKey, runID, warn)
+	writeErr := run.Interrupted(ctx, write(ctx, backend, req, byName, canonicalKey, recordKey, runID, warn))
+	endCtx, cancel := run.EndContext(ctx)
+	defer cancel()
 	if writeErr != nil {
-		if endErr := backend.EndRun(ctx, runID, statusOf(writeErr)); endErr != nil {
+		if endErr := backend.EndRun(endCtx, runID, statusOf(writeErr)); endErr != nil {
 			warn(exitcode.Warning{
 				Code:    exitcode.CodeInternal,
 				Message: fmt.Sprintf("could not close run %d in tool_runs: %v", runID, endErr),
@@ -80,7 +90,7 @@ func Upsert(ctx context.Context, backend db.Backend, req Request, warn func(exit
 		}
 		return writeErr
 	}
-	return backend.EndRun(ctx, runID, exitcode.OK)
+	return backend.EndRun(endCtx, runID, exitcode.OK)
 }
 
 func write(ctx context.Context, backend db.Backend, req Request, columns map[string]db.Column, key db.Key, recordKey string, runID int64, warn func(exitcode.Warning)) error {

@@ -1,8 +1,11 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/colligo-go/scribo/cmd"
 	"github.com/colligo-go/scribo/internal/exitcode"
@@ -13,7 +16,14 @@ func main() {
 }
 
 func run() int {
-	err := cmd.Execute()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	go func() {
+		<-ctx.Done()
+		stop()
+	}()
+
+	err := cmd.Execute(ctx)
 	if err == nil {
 		return exitcode.OK
 	}

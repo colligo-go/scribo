@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"os"
 
@@ -43,14 +44,14 @@ func newRootCommand() *cobra.Command {
 	return root
 }
 
-func Execute() *exitcode.Error {
-	return execute(newRootCommand(), os.Args[1:])
+func Execute(ctx context.Context) *exitcode.Error {
+	return execute(ctx, newRootCommand(), os.Args[1:])
 }
 
-func execute(root *cobra.Command, args []string) *exitcode.Error {
+func execute(ctx context.Context, root *cobra.Command, args []string) *exitcode.Error {
 	typeHandlerErrors(root)
 	root.SetArgs(args)
-	err := root.Execute()
+	err := root.ExecuteContext(ctx)
 	if err == nil {
 		return nil
 	}

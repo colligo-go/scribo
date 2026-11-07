@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -67,7 +68,7 @@ func TestExecuteClassifiesEveryErrorSource(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := execute(rootWithChildren(), tt.args)
+			got := execute(context.Background(), rootWithChildren(), tt.args)
 			if tt.wantNil {
 				if got != nil {
 					t.Fatalf("execute(%q) = %+v, want nil", tt.args, got)
@@ -86,8 +87,8 @@ func TestExecuteClassifiesEveryErrorSource(t *testing.T) {
 
 func TestExecuteIsIdempotentOverTheSameTree(t *testing.T) {
 	root := rootWithChildren()
-	first := execute(root, []string{"untyped"})
-	second := execute(root, []string{"untyped"})
+	first := execute(context.Background(), root, []string{"untyped"})
+	second := execute(context.Background(), root, []string{"untyped"})
 	if first == nil || second == nil || first.Code != second.Code || first.Message != second.Message {
 		t.Errorf("first = %+v, second = %+v, want the same internal error", first, second)
 	}
