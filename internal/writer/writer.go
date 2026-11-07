@@ -25,40 +25,70 @@ type Request struct {
 	ArgvShape   string
 }
 
+type Change struct {
+	Source db.HistorySource
+	db.FieldChange
+}
+
+type plan struct {
+	columns   map[string]db.Column
+	key       db.Key
+	recordKey string
+}
+
 func Upsert(ctx context.Context, backend db.Backend, req Request, warn func(exitcode.Warning)) error {
 	return run.Interrupted(ctx, upsert(ctx, backend, req, warn))
 }
 
-func upsert(ctx context.Context, backend db.Backend, req Request, warn func(exitcode.Warning)) error {
+func DryRun(ctx context.Context, backend db.Backend, req Request, warn func(exitcode.Warning)) ([]Change, error) {
+	changes, err := dryRun(ctx, backend, req, warn)
+	return changes, run.Interrupted(ctx, err)
+}
+
+func open(ctx context.Context, backend db.Backend, req Request, warn func(exitcode.Warning)) error {
 	if err := backend.Open(ctx, req.DB, db.OpenOptions{BusyTimeout: req.BusyTimeout}); err != nil {
 		return err
 	}
-	defer backend.Close()
 	for _, warning := range backend.Warnings() {
 		warn(warning)
 	}
+	return nil
+}
 
+func prepare(ctx context.Context, backend db.Backend, req Request) (plan, error) {
 	byName, err := validate.Columns(ctx, backend, req.Table, sortedNames(req.Key, req.Values))
 	if err != nil {
-		return err
+		return plan{}, err
 	}
 	uniqueKeys, err := backend.UniqueKeys(ctx, req.Table)
 	if err != nil {
-		return err
+		return plan{}, err
 	}
 	if err := validate.Key(req.Table, uniqueKeys, req.Key); err != nil {
-		return err
+		return plan{}, err
 	}
 	canonicalKey, err := validate.CanonicalKey(byName, req.Key)
 	if err != nil {
-		return err
+		return plan{}, err
 	}
 	for name, value := range req.Values {
 		if _, err := db.Coerce(byName[name], value); err != nil {
-			return err
+			return plan{}, err
 		}
 	}
 	recordKey, err := history.RecordKey(canonicalKey)
+	if err != nil {
+		return plan{}, err
+	}
+	return plan{columns: byName, key: canonicalKey, recordKey: recordKey}, nil
+}
+
+func upsert(ctx context.Context, backend db.Backend, req Request, warn func(exitcode.Warning)) error {
+	if err := open(ctx, backend, req, warn); err != nil {
+		return err
+	}
+	defer backend.Close()
+	p, err := prepare(ctx, backend, req)
 	if err != nil {
 		return err
 	}
@@ -78,7 +108,7 @@ func upsert(ctx context.Context, backend db.Backend, req Request, warn func(exit
 	if err != nil {
 		return err
 	}
-	writeErr := run.Interrupted(ctx, write(ctx, backend, req, byName, canonicalKey, recordKey, runID, warn))
+	writeErr := run.Interrupted(ctx, write(ctx, backend, req, p, runID, warn))
 	endCtx, cancel := run.EndContext(ctx)
 	defer cancel()
 	if writeErr != nil {
@@ -93,7 +123,47 @@ func upsert(ctx context.Context, backend db.Backend, req Request, warn func(exit
 	return backend.EndRun(endCtx, runID, exitcode.OK)
 }
 
-func write(ctx context.Context, backend db.Backend, req Request, columns map[string]db.Column, key db.Key, recordKey string, runID int64, warn func(exitcode.Warning)) error {
+func dryRun(ctx context.Context, backend db.Backend, req Request, warn func(exitcode.Warning)) ([]Change, error) {
+	if err := open(ctx, backend, req, warn); err != nil {
+		return nil, err
+	}
+	defer backend.Close()
+	p, err := prepare(ctx, backend, req)
+	if err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	tx, err := backend.BeginTx(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	reconciled, _, err := reconciliation(ctx, tx, req.Table, p)
+	if err != nil {
+		return nil, err
+	}
+	written, err := tx.Upsert(ctx, req.Table, p.key, req.Values, req.Mode)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Rollback(); err != nil {
+		return nil, err
+	}
+
+	changes := make([]Change, 0, len(reconciled)+len(written))
+	for _, change := range reconciled {
+		changes = append(changes, Change{Source: db.SourceReconciled, FieldChange: change})
+	}
+	for _, change := range written {
+		changes = append(changes, Change{Source: db.SourceScribo, FieldChange: change})
+	}
+	return changes, nil
+}
+
+func write(ctx context.Context, backend db.Backend, req Request, p plan, runID int64, warn func(exitcode.Warning)) error {
 	tx, err := backend.BeginTx(ctx)
 	if err != nil {
 		return err
@@ -101,17 +171,22 @@ func write(ctx context.Context, backend db.Backend, req Request, columns map[str
 	defer tx.Rollback()
 	at := time.Now()
 
-	reconciled, deleted, err := reconcile(ctx, tx, req.Table, columns, key, recordKey, runID, at)
+	reconciled, deleted, err := reconciliation(ctx, tx, req.Table, p)
 	if err != nil {
 		return err
 	}
+	if len(reconciled) > 0 {
+		if err := tx.AppendHistory(ctx, req.Table, p.recordKey, reconciled, runID, at, db.SourceReconciled); err != nil {
+			return err
+		}
+	}
 
-	changes, err := tx.Upsert(ctx, req.Table, key, req.Values, req.Mode)
+	changes, err := tx.Upsert(ctx, req.Table, p.key, req.Values, req.Mode)
 	if err != nil {
 		return err
 	}
 	if len(changes) > 0 {
-		if err := tx.AppendHistory(ctx, req.Table, recordKey, changes, runID, at, db.SourceScribo); err != nil {
+		if err := tx.AppendHistory(ctx, req.Table, p.recordKey, changes, runID, at, db.SourceScribo); err != nil {
 			return err
 		}
 	}
@@ -119,18 +194,18 @@ func write(ctx context.Context, backend db.Backend, req Request, columns map[str
 		return err
 	}
 	if len(reconciled) > 0 {
-		warn(reconciledWarning(req.Table, recordKey, reconciled, deleted))
+		warn(reconciledWarning(req.Table, p.recordKey, reconciled, deleted))
 	}
 	return nil
 }
 
-func reconcile(ctx context.Context, tx db.Tx, table string, columns map[string]db.Column, key db.Key, recordKey string, runID int64, at time.Time) ([]db.FieldChange, bool, error) {
-	projected, err := tx.ProjectedRow(ctx, table, recordKey)
+func reconciliation(ctx context.Context, tx db.Tx, table string, p plan) ([]db.FieldChange, bool, error) {
+	projected, err := tx.ProjectedRow(ctx, table, p.recordKey)
 	if err != nil {
 		return nil, false, err
 	}
 	for field := range projected {
-		if _, ok := columns[field]; !ok {
+		if _, ok := p.columns[field]; !ok {
 			delete(projected, field)
 		}
 	}
@@ -143,18 +218,12 @@ func reconcile(ctx context.Context, tx db.Tx, table string, columns map[string]d
 	}
 	sort.Strings(fields)
 
-	current, found, err := tx.SelectRow(ctx, table, key, fields)
+	current, found, err := tx.SelectRow(ctx, table, p.key, fields)
 	if err != nil {
 		return nil, false, err
 	}
 	changes := history.Reconcile(projected, current, found)
-	if len(changes) == 0 {
-		return nil, false, nil
-	}
-	if err := tx.AppendHistory(ctx, table, recordKey, changes, runID, at, db.SourceReconciled); err != nil {
-		return nil, false, err
-	}
-	return changes, !found, nil
+	return changes, !found && len(changes) > 0, nil
 }
 
 func reconciledWarning(table, recordKey string, changes []db.FieldChange, deleted bool) exitcode.Warning {

@@ -305,6 +305,13 @@ func (t *Tx) insert(ctx context.Context, table string, byName map[string]db.Colu
 }
 
 func (t *Tx) ProjectedRow(ctx context.Context, table string, recordKey string) (db.Row, error) {
+	exists, err := t.owner.tableExists(ctx, t.tx, historyTableName(table))
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
+		return db.Row{}, nil
+	}
 	rows, err := t.tx.QueryContext(ctx, fmt.Sprintf(`SELECT field, new_value, new_is_null FROM (
 		SELECT field, new_value, new_is_null,
 		       ROW_NUMBER() OVER (PARTITION BY field ORDER BY changed_at DESC, id DESC) AS rn

@@ -434,3 +434,26 @@ func TestChangedAtNeverGoesBackWithinARecord(t *testing.T) {
 		}
 	}
 }
+
+func TestProjectedRowWithoutAHistoryTable(t *testing.T) {
+	backend := newQCBackend(t, qcDDL)
+	ctx := context.Background()
+	tx, err := backend.BeginTx(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+
+	row, err := tx.ProjectedRow(ctx, "rnaseq_qc", `[["replicate","1"],["sample","S1"]]`)
+
+	if err != nil || len(row) != 0 {
+		t.Errorf("ProjectedRow = %v, %v, want an empty row and no error", row, err)
+	}
+	var tables int
+	if err := tx.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	if err := backend.db.QueryRow(`SELECT count(*) FROM sqlite_schema WHERE name = 'rnaseq_qc_history'`).Scan(&tables); err != nil || tables != 0 {
+		t.Errorf("history tables = %d, err %v, want 0", tables, err)
+	}
+}
