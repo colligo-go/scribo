@@ -16,10 +16,14 @@ import (
 const qcTable = `CREATE TABLE rnaseq_qc (sample TEXT, replicate INTEGER, Alignment_Rate REAL,
 	Mapped_Reads INTEGER, note TEXT, run_date DATETIME, UNIQUE(sample, replicate))`
 
+func openRaw(path string) (*sql.DB, error) {
+	return sql.Open("sqlite", path+"?_busy_timeout=10000")
+}
+
 func newDB(t *testing.T, ddl ...string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "study.db")
-	handle, err := sql.Open("sqlite", path)
+	handle, err := openRaw(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,7 +38,7 @@ func newDB(t *testing.T, ddl ...string) string {
 
 func query(t *testing.T, path, statement string, args ...any) [][]string {
 	t.Helper()
-	handle, err := sql.Open("sqlite", path)
+	handle, err := openRaw(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -447,7 +451,7 @@ func TestUpsertIsAtomicWhenTheHistoryWriteFails(t *testing.T) {
 }
 
 func execRaw(path string, statement string) (sql.Result, error) {
-	handle, err := sql.Open("sqlite", path)
+	handle, err := openRaw(path)
 	if err != nil {
 		return nil, err
 	}
