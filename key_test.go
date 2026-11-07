@@ -168,3 +168,15 @@ func TestUpsertWithoutKeyOrArgumentsIsPlainUsage(t *testing.T) {
 		t.Errorf("stderr = %q", got.Stderr)
 	}
 }
+
+func TestMissingTableSuggestsByPrefix(t *testing.T) {
+	t.Parallel()
+	path := newDB(t, qcTable)
+
+	got := runScribo(t, "upsert", "--db", path, "--table", "rnaseq", "--key", "sample=S1", "--key", "replicate=1", "note=x")
+
+	requireFailure(t, got, 2, "table_not_found")
+	if !strings.Contains(got.Stderr, `→ did you mean "rnaseq_qc"?`) {
+		t.Errorf("stderr = %q, want the suggestion by prefix", got.Stderr)
+	}
+}

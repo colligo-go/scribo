@@ -36,6 +36,8 @@ func newRootCommand() *cobra.Command {
 	root.PersistentFlags().IntVar(&options.busyTimeout, "busy-timeout", 5000, "milliseconds to wait for a lock held by another process")
 	root.AddCommand(newUpsertCommand(options))
 	root.AddCommand(newLogCommand(options))
+	root.AddCommand(newQueryCommand(options))
+	root.AddCommand(newExportCommand(options))
 	root.AddCommand(newExitCodesTopic())
 	root.SetVersionTemplate("scribo {{.Version}}\n")
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {

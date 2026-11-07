@@ -91,7 +91,7 @@ type Backend interface {
     BeginRun(ctx context.Context, meta RunMeta) (int64, error)
     EndRun(ctx context.Context, runID int64, exitCode int) error
 
-    SelectRows(ctx context.Context, table string, where []Predicate, fields []string) (Rows, error)
+    SelectRows(ctx context.Context, table string, where []Predicate, fields []string, limit int) (Rows, error)
     ResolveSample(ctx context.Context, ref string) (Sample, error)
     FileRoot(ctx context.Context, path string) (string, bool, error)
     InputFacts(ctx context.Context, roots []string) (InputFacts, error)
@@ -100,6 +100,8 @@ type Backend interface {
     HistoryBetween(ctx context.Context, table string, runA, runB int64) ([]HistoryRow, error)
     HistoryOf(ctx context.Context, table, recordKey, field string) ([]HistoryRow, error)
     RecordExists(ctx context.Context, table string, key Key) (bool, error)
+    Runs(ctx context.Context, ids []int64) (map[int64]RunInfo, error)
+    LastRowOfRun(ctx context.Context, table string, runID int64) (HistoryRow, bool, error)
 
     BeginTx(ctx context.Context) (Tx, error)
 }
@@ -118,7 +120,9 @@ type Tx interface {
 
 `SelectRow` returns `false` when no record matches the key and an `ambiguous_key` error (exit 3) when two or more do: the key columns must be `UNIQUE`. It matches with `IS`, so a NULL key value matches a NULL, and it reads every column as `+"column"`: the unary plus gives the expression no declared type, so the driver does not turn the text of a `DATE`, `DATETIME` or `TIMESTAMP` column into a `time.Time` that would no longer read back as the same text. `Upsert` reads the record, writes with `INSERT` or `UPDATE`, reads it again and reports the fields whose stored text differs, ordered by field name; a record that did not exist has a NULL old value for every field. `Rollback` after `Commit` returns nil so that `defer tx.Rollback()` is safe.
 
-`HistoryOf` and `RecordExists` serve `log` and never feed the history: they read outside any transaction. `HistoryOf` on a table without `{table}_history` returns no rows and creates nothing.
+`SelectRows` serves `query` and `export`: it reads outside any transaction and never feeds the history. Columns are read as `+"column"`, like `SelectRow`, and rendered as in §7. The predicates are joined by AND; `OpIsNull` and `OpNotNull` are `IS NULL` and `IS NOT NULL`, `OpNe` is `IS NOT ?` (so a NULL is kept: `!=` is the complement of `=`), and a predicate with `AsText` compares `CAST("column" AS TEXT)` with the value as text. Otherwise the value is bound as in `Coerce`: a number for a numeric column, text for any other. Records are ordered by the columns of the first unique key (§4) and then by `rowid` when the table has one, so the order is the same on every read; `limit` greater than zero adds `LIMIT`.
+
+`HistoryOf`, `RecordExists`, `Runs` and `LastRowOfRun` serve `log` and never feed the history: they read outside any transaction. `HistoryOf` on a table without `{table}_history` returns no rows and creates nothing.
 
 While a `Tx` is open, every method of the `Backend` returns an `internal` error, because the pool holds one connection and the call would otherwise wait for ever. Every identifier that comes from the user is quoted with `quoteIdent` (double quotes, an embedded quote doubled); values always go as `?` parameters.
 
@@ -168,10 +172,24 @@ type Value struct {
     IsNull bool
 }
 
+type Op int
+
+const (
+    OpEq Op = iota
+    OpNe
+    OpLt
+    OpLe
+    OpGt
+    OpGe
+    OpIsNull
+    OpNotNull
+)
+
 type Predicate struct {
-    Field string
-    Op    string
-    Value Value
+    Field  string
+    Op     Op
+    Value  Value
+    AsText bool
 }
 
 type FieldChange struct {
@@ -241,6 +259,12 @@ type HistoryRow struct {
     ChangedAt string
     Old       Value
     New       Value
+}
+
+type RunInfo struct {
+    ToolVersion string
+    Step        string
+    ExitCode    sql.NullInt64
 }
 
 type Row  map[string]Value
@@ -339,7 +363,7 @@ Validation outside the transaction. State and write inside.
 1.  validate flags                                   error → exit 1
 2.  open Backend (§3)                                error → exit 5
 3.  TableExists                                      false → exit 2, table_not_found
-4.  Columns; validate that every field exists        missing → exit 2, column_not_found, suggestion by edit distance
+4.  Columns; validate that every field exists        missing → exit 2, column_not_found, suggestion (§10)
     and that the key is a unique key (§4)             otherwise → exit 2, key_mismatch or no_unique_key
 5.  coerce values according to affinity              failure → exit 3, invalid_value
 6.  resolve --sample, if any                         failure → exit 3, unknown_sample
@@ -363,7 +387,7 @@ An error before 10 writes nothing. An error from 11 on leaves the data table, it
 
 `--batch` iterates the lines inside the same transaction. An error on any line → total ROLLBACK, message naming the line.
 
-`--dry-run` executes up to 14 inside a transaction that ends in Rollback and prints the `FieldChange` and the rules evaluated. It writes nothing at all, `tool_runs` included, and reports the reconciliation it would record. The output goes to stdout, one line per change in the format of `log` (`source` is `scribo` or `reconciled`), so it can be read and piped like any other data.
+`--dry-run` runs steps 1–8, skips 9 and 10, and runs 11–15 inside a transaction that ends in Rollback: it creates no contract table and no `{table}_history`, begins no run and appends no history, so it writes nothing at all, `tool_runs` included. It still takes the write lock, so the state it reads is the one a write would find. It prints the `FieldChange` it would record on stdout, the reconciled ones first and then its own, as a header `source  field  old_value  old_is_null  new_value  new_is_null` and one line per change with the escaping of `log`; no change → the header alone. `--format json` prints one object per line, `{"source":…,"field":…,"old":"x"|null,"new":"y"|null}`. It fails with the errors and exit codes of the write (`key_already_exists`, `invalid_value`…). The `history_reconciled` warning is not printed: the reconciliation is in the output, with `source` `reconciled`. With rules (§8, Slice 3) it will also report the rules evaluated.
 
 **Interruption.** `SIGINT` and `SIGTERM` (Ctrl-C, or the scheduler ending a job at its time limit) cancel the command's context. An open transaction rolls back, a run already begun is closed with `EndRun`, and the command exits 5 with `interrupted` (context: `the transaction was rolled back; nothing was written`). The `EndRun` of every failure path runs on a context detached from the cancelled one (`context.WithoutCancel`) and bounded to 5 seconds, since a cancelled context could not write the exit code. The wait for a lock held by another process (`--busy-timeout`) is cut short by the signal as well. A second signal ends the process at once; the database is still safe, since SQLite rolls back an unfinished transaction on the next open, and the run stays with `ended_at` NULL, which is how an interrupted run is recognised.
 
@@ -420,7 +444,7 @@ There is no magic value: a typed `null` is text. A real NULL only through `--nul
 
 An `INTEGER` column never gets a suggestion it would refuse itself: a `%` or grouping hint whose value has a decimal point drops the value (`drop the % sign`), and the two comma hints are not given at all.
 
-**Comparison.** `>`, `<`, `>=`, `<=` against a column with `Declared=false` or textual affinity → `untyped_comparison`, exit 2, suggesting `--force-text`.
+**Comparison.** A filter uses the definition of a numeric column of coercion above. On a numeric column the value must be a number (`invalid_value`, exit 3, with the hints for a refused number) and is compared as a number, so `100 > 90`. On any other column `=` and `!=` compare the exact text, and `>`, `<`, `>=`, `<=` → `untyped_comparison`, exit 2: `run_date is not a numeric column; > would compare text`, suggesting `--force-text`. `--force-text` compares every filter as text, `CAST("column" AS TEXT)`, numeric columns included.
 
 ---
 
@@ -499,7 +523,7 @@ Exit code 0 if nothing is stale, 3 if there are stale items.
 
 `scribo help exit-codes` prints the table of §12 with one line of meaning per code, for whoever writes a pipeline around Scribo. It is generated from one registry, `exitcode.Codes`, and a test keeps that registry and the `Typed codes:` list of §12 identical. `--version` prints `scribo <version> (commit <sha>, <go version>)` on stdout.
 
-A missing table is answered like a missing column: `table_not_found` with `did you mean "rnaseq_qc"?` when a table is within edit distance 2, or the list of data tables (reserved ones left out, at most 20) otherwise, or `the database has no data table yet` when there is none. `Backend.Tables` lists every table; the command layer leaves out the reserved ones. The context of an error never names a command that does not exist yet.
+A missing column or table gets a suggestion, compared without regard to case: `did you mean "rnaseq_qc"?` for the closest name within edit distance 2 (a tie goes to the alphabetically first); failing that, for the one name the given text is a prefix of (`rnaseq` → `rnaseq_qc`, but not when it is a prefix of two or more); otherwise the list of names, at most 20. A missing column is `column_not_found` with the columns of the table. A missing table is `table_not_found` with the list of data tables (reserved ones left out, at most 20), or `the database has no data table yet` when there is none. `Backend.Tables` lists every table; the command layer leaves out the reserved ones. The context of an error never names a command that does not exist yet.
 
 ### upsert
 
@@ -522,7 +546,7 @@ Flags of Slice 1:
 
 `FIELD=VALUE` arguments are split at the first `=` and `--key` and `--null` are repeatable string flags that are never split on commas, so a value or a key such as `a,b` stays one value. A usage error (exit 1) is raised before the database is opened for: a missing `--db`, `--table` or `--key`; nothing to write; an argument without `=` or with an empty name; a field given twice, including `FIELD=1` with `--null FIELD`; a key field also written; a repeated key; `--insert-only` with `--update-only`; a `--busy-timeout` that is not positive. Success prints nothing.
 
-The record key is the `record_key` of the canonical form of the key values (§7), so `replicate=01` and `replicate=1` name the same record. A table is refused with `reserved_table` (exit 2) when it is `tool_runs`, `result_inputs`, `input_signals`, `samples`, `files`, `facts` or `study_meta`, ends in `_history` or starts with `sqlite_`, compared without regard to case. Slice 1 has no `--sample`, `--input`, `--batch`, `--dry-run`, `--step`, `--quiet` or `--debug`; they arrive in later slices.
+The record key is the `record_key` of the canonical form of the key values (§7), so `replicate=01` and `replicate=1` name the same record. A table is refused with `reserved_table` (exit 2) when it is `tool_runs`, `result_inputs`, `input_signals`, `samples`, `files`, `facts` or `study_meta`, ends in `_history` or starts with `sqlite_`, compared without regard to case. `--dry-run` (§5) prints what the write would record and writes nothing; `--format tsv|json` chooses its output and is a usage error without `--dry-run`. There is no `--sample`, `--input`, `--batch`, `--step`, `--quiet` or `--debug` yet; they arrive in later slices.
 
 `--sample S` resolves through Colligo's `samples` table and adds the key `sample=<id>`. `--insert-only`, `--update-only`, `--dry-run`, `--progress`.
 
@@ -542,20 +566,35 @@ With `--at`, the state at that moment: TSV `field  value  is_null`, one line per
 
 A key with no history: `key_not_found` (exit 3) when no record has it, an empty result (header only, exit 0) when the record exists but was never written by Scribo. `log` writes nothing: no `tool_runs` row, no contract or history table created.
 
-Planned for Slice 2:
+`--format pretty` shows the rows of the TSV form in aligned columns, without the `is_null` columns and with a NULL as `∅`; with `--at`, the columns `field` and `value`. It is chosen explicitly, never by detecting a terminal: the output of a command does not change with where it is written.
 
-- `--format pretty`: the same rows as TSV in aligned columns, with `NULL` shown as `∅` and without the `is_null` columns, for a person at a terminal. It is chosen explicitly, never by detecting a terminal: the output of a command does not change with where it is written.
-- `--with-runs`: adds `tool_version`, `step` and `exit_code` of the run that wrote each row, from `tool_runs`.
-- `--at run:N`: the state right after the last history row that run `N` wrote in this table, every row up to it in `(changed_at, id)` order. A run that wrote nothing in this table → `run_not_found`, exit 3. Run ids are not used as an order by themselves: two runs may start in one order and commit in the other.
+`--with-runs` adds `tool_version`, `step` and `exit_code` of the run that wrote each row, read from `tool_runs`, to the history form in every format. `step` is empty when the run had none; `exit_code` is an empty cell in TSV, `null` in JSON and `∅` in `pretty` while the run is open or after it was killed. It does not apply to `--at`: with `--at` it is a usage error.
+
+`--at run:N` shows the state right after the last history row that run `N` wrote in this table, to any record: every row of the record up to that one in `(changed_at, id)` order, so two runs that share a `changed_at` are told apart by `id`. `N` must be an integer greater than zero (usage error otherwise). A run that wrote nothing in this table → `run_not_found`, exit 3, `run 7 wrote nothing to rnaseq_qc`. Run ids are not used as an order by themselves: two runs may start in one order and commit in the other. The approximate fields are found as with a timestamp.
 
 ### query, export
 
 ```
-scribo query  --db DB --table T [--where COND]... [--fields F1,F2] [--format tsv|json|csv] [--limit N] [--with-staleness]
-scribo export --db DB --table T [--where COND]... [--out PATH] [--format tsv|json|csv] [--with-staleness]
+scribo query  --db DB --table T [--where COND]... [--is-null F]... [--not-null F]... [--fields F1,F2] [--format tsv|json|csv|pretty] [--limit N] [--force-text] [--with-staleness]
+scribo export --db DB --table T [--where COND]... [--is-null F]... [--not-null F]... [--out PATH] [--overwrite] [--format tsv|json|csv] [--force-text] [--with-staleness]
 ```
 
-`--with-staleness` adds the `_stale` column computed from the graph.
+`--where COND` is `FIELD<op>VALUE` with one of `=`, `!=`, `>`, `<`, `>=`, `<=`; repeatable. `null` in a value is the text `null`, never NULL: a real NULL is filtered with `--is-null FIELD` and `--not-null FIELD`, both repeatable. Every filter is joined by AND.
+
+`--fields` takes comma-separated names, repeatable, printed in the order given; a name given twice is a usage error. Without it, every column in table order. `--limit N` needs `N > 0`. Records come in the order of `SelectRows` (§2): the first unique key, then `rowid`.
+
+Formats:
+
+- `tsv` (the default): a header with the names, a NULL as `\N`, and `\`, tab, LF and CR escaped as `\\`, `\t`, `\n`, `\r`, the escaping of `log`; a literal text `\N` is written `\\N`.
+- `csv`: RFC 4180, written by hand because `encoding/csv` cannot quote an empty text. A field holding `,`, `"`, CR or LF is quoted with `"` doubled; the empty text is `""`; a NULL is an empty unquoted field. Lines end in LF.
+- `json`: one object per line, keys in column order, values as strings or `null`, no HTML escaping.
+- `pretty` (`query` only): aligned columns with a line of dashes under the header, a NULL as `∅`, control characters escaped as in `tsv`. Column width counts characters, not bytes.
+
+`export` writes to stdout, or to `--out PATH`. An existing `PATH` without `--overwrite` → `file_exists`, exit 4, before the database is opened. The file is written to a temporary file in the same directory, synced, closed and renamed over `PATH`, so a failure leaves `PATH` as it was and removes the temporary file; an overwritten file keeps its permissions and a new one gets `0644`. `export` has no `--limit` nor `pretty`.
+
+`query` and `export` never write: no `tool_runs` row, no table created. A reserved or missing table gets the errors of `upsert`.
+
+`--with-staleness` adds the `_stale` column computed from the graph (Slice 3).
 
 ### schema
 
@@ -652,9 +691,9 @@ ERROR [<typed_code>]: <main message>
 → <context, line of the error, suggestion>
 ```
 
-Typed codes: `table_not_found`, `column_not_found`, `key_not_found`, `key_already_exists`, `invalid_value`, `untyped_comparison`, `unknown_sample`, `input_not_found`, `invalid_rules`, `invariant_violated`, `rule_unavailable`, `colligo_required`, `contract_mismatch`, `stale_results`, `nondeterministic_change`, `file_not_found`, `invalid_format`, `batch_failed`, `db_busy`, `permission_denied`, `synced_path`, `pragma_ineffective`, `usage`, `internal`, `io_error`, `network_filesystem`, `constraint_failed`, `reserved_table`, `ambiguous_key`, `history_reconciled`, `history_approximate`, `key_mismatch`, `no_unique_key`, `interrupted`, `run_not_found`, `tool_version_unknown`.
+Typed codes: `table_not_found`, `column_not_found`, `key_not_found`, `key_already_exists`, `invalid_value`, `untyped_comparison`, `unknown_sample`, `input_not_found`, `invalid_rules`, `invariant_violated`, `rule_unavailable`, `colligo_required`, `contract_mismatch`, `stale_results`, `nondeterministic_change`, `file_not_found`, `invalid_format`, `batch_failed`, `db_busy`, `permission_denied`, `synced_path`, `pragma_ineffective`, `usage`, `internal`, `io_error`, `network_filesystem`, `constraint_failed`, `reserved_table`, `ambiguous_key`, `history_reconciled`, `history_approximate`, `key_mismatch`, `no_unique_key`, `interrupted`, `run_not_found`, `tool_version_unknown`, `file_exists`.
 
-New in Slice 2: `key_mismatch` and `no_unique_key` (the key is not exactly one unique key of the table, §4; exit 2), `interrupted` (a signal ended the command, §5; exit 5), `run_not_found` (`log --at run:N` for a run that wrote nothing in the table; exit 3) and the warning `tool_version_unknown` (§10, ingest).
+New in Slice 2: `key_mismatch` and `no_unique_key` (the key is not exactly one unique key of the table, §4; exit 2), `interrupted` (a signal ended the command, §5; exit 5), `run_not_found` (`log --at run:N` for a run that wrote nothing in the table; exit 3) the warning `tool_version_unknown` (§10, ingest) and `file_exists` (`export --out` to a file that exists, without `--overwrite`; exit 4).
 
 New in Slice 1: `constraint_failed` (the database refused a value: NOT NULL, UNIQUE, CHECK or a trigger; exit 3), `reserved_table` (the table is one Scribo or Colligo owns, or a `_history` or `sqlite_` table; exit 2), `ambiguous_key` (a key matches more than one record because its columns are not UNIQUE; exit 3), `io_error` (a database error with no more specific code, exit 5) and the warnings `network_filesystem`, `history_reconciled` and `history_approximate` (§6), which never change the exit status.
 

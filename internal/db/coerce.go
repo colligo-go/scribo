@@ -37,7 +37,7 @@ func Coerce(column Column, v Value) (any, error) {
 	if v.IsNull {
 		return nil, nil
 	}
-	if !isNumeric(column) {
+	if !IsNumeric(column) {
 		return v.Raw, nil
 	}
 
@@ -67,7 +67,11 @@ func Coerce(column Column, v Value) (any, error) {
 	return f, nil
 }
 
-func isNumeric(column Column) bool {
+// IsNumeric reports whether column takes numbers: INTEGER or REAL affinity,
+// or a NUMERIC column declared as NUMERIC or DECIMAL. A DATE, DATETIME or
+// BOOLEAN column is NUMERIC only by elimination and is not numeric here.
+// Coercion on write and comparison in a filter use this one definition.
+func IsNumeric(column Column) bool {
 	switch column.Affinity {
 	case "INTEGER", "REAL":
 		return true

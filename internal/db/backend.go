@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"database/sql"
 	"time"
 
 	"github.com/colligo-go/scribo/internal/exitcode"
@@ -36,6 +37,15 @@ type HistoryRow struct {
 	ChangedAt string
 	Old       Value
 	New       Value
+}
+
+// RunInfo is what log --with-runs shows of the run that wrote a history
+// row. Step is empty when the run had none; ExitCode is not valid while the
+// run is still open or was interrupted before it closed.
+type RunInfo struct {
+	ToolVersion string
+	Step        string
+	ExitCode    sql.NullInt64
 }
 
 // WriteMode says what an upsert may do when the record does or does not exist.
@@ -81,7 +91,8 @@ type Tx interface {
 
 	// ProjectedRow is the state the history asserts for a record: for each
 	// field with history, the new value of its last row in (changed_at, id)
-	// order. A record with no history gives an empty Row.
+	// order. A record with no history, or a table with no {table}_history
+	// yet, gives an empty Row and creates nothing.
 	ProjectedRow(ctx context.Context, table string, recordKey string) (Row, error)
 
 	// Upsert writes values to the record the key names, as mode allows, and
@@ -146,6 +157,14 @@ type Backend interface {
 	// list.
 	UniqueKeys(ctx context.Context, table string) ([][]string, error)
 
+	// SelectRows reads the given fields of every record that matches all
+	// the predicates, at most limit records when limit is greater than
+	// zero. Records come ordered by the columns of the table's first unique
+	// key, or by rowid when it has none, so two reads of the same data give
+	// the same order. Values are rendered like the history's. It reads
+	// outside any transaction and never feeds the history.
+	SelectRows(ctx context.Context, table string, where []Predicate, fields []string, limit int) (Rows, error)
+
 	// BeginTx opens a BEGIN IMMEDIATE transaction. While it is open every
 	// other Backend method returns an internal error: the pool holds one
 	// connection and the call would wait for ever.
@@ -161,6 +180,16 @@ type Backend interface {
 	// It reads outside any transaction, so its answer must never feed the
 	// history; only Tx.SelectRow does that.
 	RecordExists(ctx context.Context, table string, key Key) (bool, error)
+
+	// Runs returns the tool_runs details of the given run ids. An id with no
+	// row is absent from the map.
+	Runs(ctx context.Context, ids []int64) (map[int64]RunInfo, error)
+
+	// LastRowOfRun returns the last history row, in (changed_at, id) order,
+	// that run runID wrote to {table}_history, whatever the record. The
+	// boolean is false when the run wrote nothing there, or the table has no
+	// history yet.
+	LastRowOfRun(ctx context.Context, table string, runID int64) (HistoryRow, bool, error)
 
 	// BeginRun records the start of an execution in tool_runs and returns
 	// its id. The row is committed at once, so it survives a failed write.

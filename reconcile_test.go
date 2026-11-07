@@ -7,9 +7,9 @@ import (
 	"testing"
 )
 
-func mustExec(t *testing.T, path, statement string) {
+func mustExec(t *testing.T, path, statement string, args ...any) {
 	t.Helper()
-	if _, err := execRaw(path, statement); err != nil {
+	if _, err := execRaw(path, statement, args...); err != nil {
 		t.Fatalf("%s: %v", statement, err)
 	}
 }

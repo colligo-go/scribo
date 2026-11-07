@@ -49,6 +49,7 @@ const (
 	CodeSyncedPath         = "synced_path"
 	CodeRunNotFound        = "run_not_found"
 	CodeToolVersionUnknown = "tool_version_unknown"
+	CodeFileExists         = "file_exists"
 )
 
 type Error struct {
