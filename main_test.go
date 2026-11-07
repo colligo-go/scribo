@@ -70,6 +70,7 @@ func runScriboNoFatal(args ...string) result {
 }
 
 func TestExitCodesAndStreams(t *testing.T) {
+	t.Parallel()
 	usageHint := "→ run 'scribo --help' for usage\n"
 	tests := []struct {
 		name       string
@@ -95,6 +96,7 @@ func TestExitCodesAndStreams(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got := runScribo(t, tt.args...)
 			if got.ExitCode != tt.wantExit {
 				t.Errorf("exit code = %d, want %d", got.ExitCode, tt.wantExit)

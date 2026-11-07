@@ -55,6 +55,7 @@ func requireChain(t *testing.T, path string) {
 }
 
 func TestReconcileOutsideEdit(t *testing.T) {
+	t.Parallel()
 	path := seeded(t)
 	mustExec(t, path, "UPDATE rnaseq_qc SET note = 'edited'")
 
@@ -77,6 +78,7 @@ func TestReconcileOutsideEdit(t *testing.T) {
 }
 
 func TestReconcileComesBeforeTheWriteOnTheSameField(t *testing.T) {
+	t.Parallel()
 	path := seeded(t)
 	mustExec(t, path, "UPDATE rnaseq_qc SET Mapped_Reads = 50")
 
@@ -101,6 +103,7 @@ func TestReconcileComesBeforeTheWriteOnTheSameField(t *testing.T) {
 }
 
 func TestReconcileIgnoresAnEditThatWasUndone(t *testing.T) {
+	t.Parallel()
 	path := seeded(t)
 	mustExec(t, path, "UPDATE rnaseq_qc SET note = 'other'")
 	mustExec(t, path, "UPDATE rnaseq_qc SET note = 'ok'")
@@ -113,6 +116,7 @@ func TestReconcileIgnoresAnEditThatWasUndone(t *testing.T) {
 }
 
 func TestReconcileOutsideNull(t *testing.T) {
+	t.Parallel()
 	path := seeded(t)
 	mustExec(t, path, "UPDATE rnaseq_qc SET note = NULL")
 
@@ -125,6 +129,7 @@ func TestReconcileOutsideNull(t *testing.T) {
 }
 
 func TestReconcileIgnoresFieldsWithoutHistory(t *testing.T) {
+	t.Parallel()
 	path := seeded(t)
 	mustExec(t, path, "UPDATE rnaseq_qc SET run_date = '2026-01-01 00:00:00'")
 
@@ -136,6 +141,7 @@ func TestReconcileIgnoresFieldsWithoutHistory(t *testing.T) {
 }
 
 func TestReconcileDeletedRecord(t *testing.T) {
+	t.Parallel()
 	path := seeded(t)
 	mustExec(t, path, "DELETE FROM rnaseq_qc")
 
@@ -152,6 +158,7 @@ func TestReconcileDeletedRecord(t *testing.T) {
 }
 
 func TestReconcileComparesTheStoredForm(t *testing.T) {
+	t.Parallel()
 	path := seeded(t)
 	mustExec(t, path, "UPDATE rnaseq_qc SET Alignment_Rate = '94.30'")
 
@@ -163,6 +170,7 @@ func TestReconcileComparesTheStoredForm(t *testing.T) {
 }
 
 func TestReconcileRowsRollBackWithAFailedWrite(t *testing.T) {
+	t.Parallel()
 	path := seeded(t)
 	mustExec(t, path, "UPDATE rnaseq_qc SET note = 'x'")
 
@@ -179,6 +187,7 @@ func TestReconcileRowsRollBackWithAFailedWrite(t *testing.T) {
 }
 
 func TestHistoryChainStaysContinuous(t *testing.T) {
+	t.Parallel()
 	path := seeded(t)
 	mustExec(t, path, "UPDATE rnaseq_qc SET note = 'edited'")
 	requireReconcileWarning(t, upsertS1(t, path, "Mapped_Reads=13"))
@@ -191,6 +200,7 @@ func TestHistoryChainStaysContinuous(t *testing.T) {
 }
 
 func TestReconcileSkipsAColumnDroppedFromTheTable(t *testing.T) {
+	t.Parallel()
 	path := seeded(t)
 	before := historyOf(t, path, "note")
 	mustExec(t, path, "ALTER TABLE rnaseq_qc DROP COLUMN note")

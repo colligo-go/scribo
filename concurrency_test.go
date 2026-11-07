@@ -14,6 +14,7 @@ const (
 )
 
 func TestConcurrentWritersKeepTheHistoryChain(t *testing.T) {
+	t.Parallel()
 	path := newDB(t, qcTable)
 	requireSuccess(t, upsertS1(t, path, "Mapped_Reads=1"))
 

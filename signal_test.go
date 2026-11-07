@@ -33,6 +33,7 @@ func holdWriteLock(t *testing.T, path string) {
 }
 
 func TestSignalEndsAWaitingUpsertCleanly(t *testing.T) {
+	t.Parallel()
 	for _, tt := range []struct {
 		name   string
 		signal os.Signal
@@ -41,6 +42,7 @@ func TestSignalEndsAWaitingUpsertCleanly(t *testing.T) {
 		{"SIGTERM", syscall.SIGTERM},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			path := seeded(t)
 			before := snapshot(t, path, "rnaseq_qc", "rnaseq_qc_history", "tool_runs")
 			holdWriteLock(t, path)

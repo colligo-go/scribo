@@ -6,6 +6,7 @@ import (
 )
 
 func TestUpsertPartialKeyIsRefusedAndWritesNothing(t *testing.T) {
+	t.Parallel()
 	path := seeded(t)
 	before := snapshot(t, path, "rnaseq_qc", "rnaseq_qc_history", "tool_runs")
 
@@ -21,6 +22,7 @@ func TestUpsertPartialKeyIsRefusedAndWritesNothing(t *testing.T) {
 }
 
 func TestUpsertPartialKeyWritesNoRunOnAFreshDatabase(t *testing.T) {
+	t.Parallel()
 	path := newDB(t, qcTable)
 
 	requireFailure(t, upsert(t, path, "--key", "sample=S1", "note=x"), 2, "key_mismatch")
@@ -31,6 +33,7 @@ func TestUpsertPartialKeyWritesNoRunOnAFreshDatabase(t *testing.T) {
 }
 
 func TestPartialKeyDoesNotSplitTheHistory(t *testing.T) {
+	t.Parallel()
 	path := seeded(t)
 
 	requireFailure(t, upsert(t, path, "--key", "sample=S1", "note=changed"), 2, "key_mismatch")
@@ -48,6 +51,7 @@ func TestPartialKeyDoesNotSplitTheHistory(t *testing.T) {
 }
 
 func TestLogPartialKeyIsRefused(t *testing.T) {
+	t.Parallel()
 	path := seeded(t)
 
 	got := runScribo(t, "log", "--db", path, "--table", "rnaseq_qc", "--key", "sample=S1")
@@ -56,6 +60,7 @@ func TestLogPartialKeyIsRefused(t *testing.T) {
 }
 
 func TestKeyOnATableWithoutUniqueKeyIsRefused(t *testing.T) {
+	t.Parallel()
 	path := newDB(t, `CREATE TABLE rnaseq_qc (sample TEXT, replicate INTEGER, note TEXT)`)
 
 	requireFailure(t, upsertS1(t, path, "note=a"), 2, "no_unique_key")
