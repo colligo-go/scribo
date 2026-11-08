@@ -19,9 +19,20 @@ if [[ $declared != "$listed" ]]; then
   diff <(echo "$declared") <(echo "$listed") || true
   exit 1
 fi
+fuzz() {
+  go test -run='^$' -fuzz="^$1\$" -fuzztime="$duration" "$2" 2>&1 | tee "$log"
+}
+log=$(mktemp)
+trap 'rm -f "$log"' EXIT
 for target in "${targets[@]}"; do
   name=${target%%:*}
   echo "::group::$name"
-  go test -run='^$' -fuzz="^${name}\$" -fuzztime="$duration" "${target#*:}"
+  if ! fuzz "$name" "${target#*:}"; then
+    if grep -q 'Failing input written to' "$log" || ! grep -q 'context deadline exceeded' "$log"; then
+      exit 1
+    fi
+    echo "$name: the fuzzer stopped on its own deadline without a failing input; running it once more"
+    fuzz "$name" "${target#*:}"
+  fi
   echo "::endgroup::"
 done
