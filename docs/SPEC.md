@@ -389,6 +389,8 @@ Validation outside the transaction. State and write inside.
 
 Error from 11 on → Rollback, message on stderr, appropriate exit code, `EndRun` with the code.
 
+An `EndRun` that fails never changes the exit code: after a failed write it is a warning beside the error, and after the `Commit` of step 17 it is a warning and the command exits 0, since the data and its history are written. The run then stays with `ended_at` NULL.
+
 An error before 10 writes nothing. An error from 11 on leaves the data table, its history, `result_inputs` and `input_signals` as they were, and exactly one new `tool_runs` row with a non-zero `exit_code`: the failed run is recorded, its effects are not. The one exception is the `suspect` signal of a violated invariant (§8), stored on purpose in a transaction of its own.
 
 `--batch` iterates the lines inside the same transaction. An error on any line → total ROLLBACK, message naming the line. `ingest multiqc` (§10) already writes this way, through `writer.UpsertMany`: steps 1–8 for every record, then one run and one transaction for all of them; a single `upsert` is `UpsertMany` with one record.

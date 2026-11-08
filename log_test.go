@@ -194,7 +194,7 @@ func TestLogRefusesAmbiguousMoments(t *testing.T) {
 	t.Parallel()
 	path := seeded(t)
 
-	for _, at := range []string{"2026-11-06", "ontem"} {
+	for _, at := range []string{"2026-11-06", "ontem", "9999-12-31T23:59:59-23:59", "0000-01-01T00:00:00+00:01"} {
 		requireFailure(t, logS1(t, path, "--at", at), 1, "usage")
 	}
 }
@@ -257,5 +257,42 @@ func TestLogHelp(t *testing.T) {
 		if !strings.Contains(got.Stdout, want) {
 			t.Errorf("help does not mention %q", want)
 		}
+	}
+}
+
+func TestLogAtJSONWritesOneObjectWithSortedFields(t *testing.T) {
+	t.Parallel()
+	path := seeded(t)
+	requireSuccess(t, upsertS1(t, path, "note=null", "run_date=", "--null", "Mapped_Reads"))
+
+	got := logS1(t, path, "--at", time.Now().Add(time.Hour).Format(time.RFC3339Nano), "--format", "json")
+
+	lines := requireData(t, got)
+	want := `{"Alignment_Rate":"94.3","Mapped_Reads":null,"note":"null","run_date":""}`
+	if len(lines) != 1 || lines[0] != want {
+		t.Errorf("stdout = %q, want %q", got.Stdout, want+"\n")
+	}
+	if got.Stderr != "" {
+		t.Errorf("stderr = %q", got.Stderr)
+	}
+}
+
+func TestLogAtJSONKeepsMarkupAndWarnsWhenApproximate(t *testing.T) {
+	t.Parallel()
+	path := newDB(t, qcTable)
+	requireSuccess(t, upsertS1(t, path, "note=<a&b>", "Mapped_Reads=12"))
+	time.Sleep(5 * time.Millisecond)
+	mustExec(t, path, "UPDATE rnaseq_qc SET note = 'edited'")
+	requireReconcileWarning(t, upsertS1(t, path, "Mapped_Reads=13"))
+	moment := between(t, path, "12", "13")
+
+	got := logS1(t, path, "--at", moment.Format(time.RFC3339Nano), "--format", "json")
+
+	lines := requireData(t, got)
+	if want := `{"Mapped_Reads":"12","note":"<a&b>"}`; len(lines) != 1 || lines[0] != want {
+		t.Errorf("stdout = %q, want %q", got.Stdout, want+"\n")
+	}
+	if !strings.Contains(got.Stderr, "WARNING [history_approximate]: state of note at ") {
+		t.Errorf("stderr = %q", got.Stderr)
 	}
 }

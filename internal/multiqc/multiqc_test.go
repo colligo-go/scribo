@@ -2,11 +2,13 @@ package multiqc
 
 import (
 	"errors"
+	"io"
 	"os"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
+	"testing/iotest"
 
 	"github.com/colligo-go/scribo/internal/exitcode"
 )
@@ -332,6 +334,7 @@ func TestInvalidDocuments(t *testing.T) {
 		{"trailing data", `{"report_general_stats_data": {}} {}`, "after the JSON object"},
 		{"no general stats", `{"report_saved_raw_data": {}}`, "report_general_stats_data"},
 		{"general stats is a list", `{"report_general_stats_data": [{}]}`, "report_general_stats_data"},
+		{"group is not an object", `{"report_general_stats_data": {"g": 3}}`, "report_general_stats_data.g is not"},
 		{"sample is not an object", `{"report_general_stats_data": {"g": {"S1": 3}}}`, "report_general_stats_data.g.S1"},
 	}
 	for _, tt := range tests {
@@ -360,5 +363,78 @@ func TestVersionSearchIsDepthFirstInByteOrder(t *testing.T) {
 	want := map[string]string{"S1": "1", "S2": "text wins"}
 	if len(table.Versions) != len(want) || table.Versions["S1"] != "1" || table.Versions["S2"] != "text wins" {
 		t.Errorf("versions = %v, want %v", table.Versions, want)
+	}
+}
+
+func TestReadFailuresAreNotInvalidFormat(t *testing.T) {
+	failure := errors.New("input/output error")
+	tests := []struct {
+		name   string
+		reader io.Reader
+	}{
+		{"before the object", iotest.ErrReader(failure)},
+		{"inside the object", io.MultiReader(strings.NewReader(`{"report_general_stats_data": {`), iotest.ErrReader(failure))},
+		{"after the object", io.MultiReader(strings.NewReader(`{"report_general_stats_data": {}}`), iotest.ErrReader(failure))},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := Read(tt.reader)
+
+			var domain *exitcode.Error
+			if !errors.Is(err, failure) || errors.As(err, &domain) {
+				t.Errorf("error = %v, want the read failure itself, for the caller to classify", err)
+			}
+		})
+	}
+}
+
+func TestGeneralStatsGroupsThatDisagree(t *testing.T) {
+	report := synthetic(t, `{
+	  "report_general_stats_headers": {"salmon": {"n": {"namespace": "Salmon"}}, "salmon_3": {"n": {"namespace": "Salmon"}}},
+	  "report_general_stats_data": {"salmon": {"S1": {"n": 10}}, "salmon_3": {"S1": {"n": 11}}}
+	}`)
+
+	_, err := report.GeneralStats()
+
+	requireCode(t, err, exitcode.File, exitcode.CodeInvalidFormat, "salmon and salmon_3 disagree on n for S1")
+}
+
+func TestVersionsOfGroupsThatDisagree(t *testing.T) {
+	report := synthetic(t, `{
+	  "report_general_stats_headers": {"a": {"x": {"namespace": "T"}}, "b": {"y": {"namespace": "T"}}},
+	  "report_general_stats_data": {"a": {"S1": {"t_version": "1.0", "x": 1}}, "b": {"S1": {"t_version": "1.1", "y": 2}}}
+	}`)
+
+	_, err := report.Module("t")
+
+	requireCode(t, err, exitcode.File, exitcode.CodeInvalidFormat, "a and b disagree on t_version for S1")
+}
+
+func TestVersionThatIsNullOrNotAScalarIsIgnored(t *testing.T) {
+	report := synthetic(t, `{
+	  "report_general_stats_headers": {"a": {"x": {"namespace": "T"}}, "b": {"y": {"namespace": "T"}}},
+	  "report_general_stats_data": {
+	    "a": {"S1": {"t_version": null, "x": 1}, "S2": {"t_version": {"v": 1}, "x": 2}},
+	    "b": {"S1": {"t_version": "1.1", "y": 3}}
+	  }
+	}`)
+
+	table, err := report.Module("t")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(table.Versions) != 1 || table.Versions["S1"] != "1.1" {
+		t.Errorf("versions = %v, want only S1 1.1", table.Versions)
+	}
+}
+
+func TestHeaderThatIsNotAnObjectDoesNotNameTheModule(t *testing.T) {
+	report := synthetic(t, `{
+	  "report_general_stats_headers": {"group": {"a": 3, "b": {"namespace": "Tool"}}},
+	  "report_general_stats_data": {"group": {"S1": {"a": 1, "b": 2}}}
+	}`)
+
+	if got := report.Modules(); !slices.Equal(got, []string{"tool"}) {
+		t.Errorf("modules = %v, want [tool]", got)
 	}
 }

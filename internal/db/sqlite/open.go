@@ -62,22 +62,10 @@ func verifyPragmas(conn sqlite.ExecQuerierContext, dsn string) error {
 }
 
 func expectedPragma(name, requested string) string {
-	switch name {
-	case "journal_mode":
-		return strings.ToLower(requested)
-	case "synchronous":
-		switch strings.ToUpper(requested) {
-		case "OFF":
-			return "0"
-		case "NORMAL":
-			return "1"
-		case "FULL":
-			return "2"
-		case "EXTRA":
-			return "3"
-		}
+	if name == "synchronous" && strings.EqualFold(requested, "NORMAL") {
+		return "1"
 	}
-	return requested
+	return strings.ToLower(requested)
 }
 
 func readPragma(conn sqlite.ExecQuerierContext, name string) (string, error) {

@@ -35,7 +35,11 @@ func runTests(m *testing.M) int {
 	defer os.RemoveAll(dir)
 
 	binaryPath = filepath.Join(dir, "scribo")
-	build := exec.Command("go", "build", "-race", "-o", binaryPath, ".")
+	args := []string{"build", "-race", "-o", binaryPath}
+	if os.Getenv("SCRIBO_COVERDIR") != "" {
+		args = append(args, "-cover", "-coverpkg=github.com/colligo-go/scribo/...")
+	}
+	build := exec.Command("go", append(args, ".")...)
 	if output, err := build.CombinedOutput(); err != nil {
 		fmt.Fprintf(os.Stderr, "build failed: %v\n%s", err, output)
 		return 1

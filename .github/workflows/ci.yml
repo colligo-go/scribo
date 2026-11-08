@@ -44,11 +44,14 @@ jobs:
       - name: Test
         run: go test -race -count=2 -timeout 30m ./...
 
-      - name: Fuzz record_key
-        run: go test -run='^$' -fuzz=FuzzRecordKey -fuzztime=30s ./internal/history
+      - name: Coverage self-test
+        run: bash .github/check-coverage.sh --self-test
 
-      - name: Fuzz the canonical form
-        run: go test -run='^$' -fuzz=FuzzCanonicalIsStable -fuzztime=30s ./internal/db
+      - name: Coverage
+        run: bash .github/check-coverage.sh
+
+      - name: Fuzz
+        run: bash .github/fuzz.sh 20s
 
       - name: Secrets in history
         run: |
@@ -62,3 +65,15 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.COLLIGO_READ_TOKEN }}
         run: bash .github/check-contract.sh
+
+  test-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Test
+        run: go test -race -count=1 -timeout 30m ./...

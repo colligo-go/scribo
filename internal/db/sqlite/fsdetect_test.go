@@ -55,7 +55,7 @@ func TestDetectRealFilesystem(t *testing.T) {
 	if err != nil {
 		t.Fatalf("detectFS: %v", err)
 	}
-	if info.Name == "" {
-		t.Error("filesystem name is empty")
+	if info.Name == "" || info.Network {
+		t.Errorf("the test's temporary directory is on %+v, want a named local filesystem", info)
 	}
 }

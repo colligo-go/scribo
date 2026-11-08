@@ -168,7 +168,14 @@ func upsertMany(ctx context.Context, backend db.Backend, batch Batch, warn func(
 		}
 		return writeErr
 	}
-	return backend.EndRun(endCtx, runID, exitcode.OK)
+	if endErr := backend.EndRun(endCtx, runID, exitcode.OK); endErr != nil {
+		warn(exitcode.Warning{
+			Code:    exitcode.CodeInternal,
+			Message: fmt.Sprintf("the write was committed, but run %d could not be closed in tool_runs: %v", runID, endErr),
+			Context: "the data and its history are written; the run stays with ended_at NULL",
+		})
+	}
+	return nil
 }
 
 func dryRun(ctx context.Context, backend db.Backend, req Request, warn func(exitcode.Warning)) ([]Change, error) {
@@ -324,9 +331,6 @@ func reconciledRecordsWarning(table string, found []reconciledRecord) exitcode.W
 	names := make([]string, len(found))
 	for i, record := range found {
 		names[i] = record.record.Name
-		if names[i] == "" {
-			names[i] = record.record.recordKey
-		}
 	}
 	noun := "records"
 	if len(names) == 1 {
