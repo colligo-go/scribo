@@ -44,6 +44,12 @@ jobs:
       - name: Test
         run: go test -race -count=2 -timeout 30m ./...
 
+      - name: Coverage self-test
+        run: bash .github/coverage.sh --self-test
+
+      - name: Coverage
+        run: bash .github/coverage.sh
+
       - name: Fuzz record_key
         run: go test -run='^$' -fuzz=FuzzRecordKey -fuzztime=30s ./internal/history
 
