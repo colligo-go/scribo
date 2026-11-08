@@ -121,6 +121,10 @@ func refuseCollisions(columns []db.ColumnDefinition, noun string) error {
 		if column.Name == "" {
 			return invalidFormat(fmt.Sprintf("a %s has an empty name", noun), "")
 		}
+		if strings.ContainsRune(column.Name, 0) {
+			return invalidFormat(fmt.Sprintf("the name of %s %q holds a NUL byte", noun, column.Name),
+				"SQLite ends a statement at a NUL byte, so no column can be named with one")
+		}
 		lower := strings.ToLower(column.Name)
 		if first, taken := seen[lower]; taken {
 			return invalidFormat(fmt.Sprintf("%s %s and %s name the same column", noun, first, column.Name),

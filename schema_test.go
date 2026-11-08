@@ -140,6 +140,8 @@ func TestSchemaRefusals(t *testing.T) {
 	  "report_general_stats_data": {"tool": {"S1": {"Reads": 1, "reads": 2}}}
 	}`)
 	directory := t.TempDir()
+	nulTSV := writeTemp(t, "nul.tsv", "sample\tva\x00lue\nS1\t1\n")
+	nulReport := writeTemp(t, "nul.json", `{"report_general_stats_data": {"tool": {"S1": {"m\u0000": 1}}}}`)
 	tests := []struct {
 		name     string
 		args     []string
@@ -166,6 +168,8 @@ func TestSchemaRefusals(t *testing.T) {
 		{"empty tsv", []string{"--from", empty, "--table", "t", "--key", "sample"}, 4, "invalid_format", []string{"the file is empty"}},
 		{"column without a name", []string{"--from", unnamed, "--table", "t", "--key", "sample"}, 4, "invalid_format", []string{"empty name"}},
 		{"metrics equal but for case", []string{"--from-multiqc", colliding, "--table", "t", "--module", "tool"}, 4, "invalid_format", []string{"Reads and reads name the same column"}},
+		{"column name with a NUL byte", []string{"--from", nulTSV, "--table", "t", "--key", "sample"}, 4, "invalid_format", []string{"holds a NUL byte"}},
+		{"metric name with a NUL byte", []string{"--from-multiqc", nulReport, "--table", "t", "--module", "tool"}, 4, "invalid_format", []string{"holds a NUL byte"}},
 		{"tsv is a directory", []string{"--from", directory, "--table", "t", "--key", "sample"}, 5, "io_error", []string{"cannot read " + directory}},
 		{"report is a directory", []string{"--from-multiqc", directory, "--table", "t"}, 5, "io_error", []string{"cannot read " + directory}},
 	}
