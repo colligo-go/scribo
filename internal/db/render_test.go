@@ -2,6 +2,7 @@ package db
 
 import (
 	"errors"
+	"math"
 	"testing"
 	"time"
 
@@ -16,7 +17,16 @@ func TestRender(t *testing.T) {
 	}{
 		{"whole float", 3.0, Value{Raw: "3"}},
 		{"float", 94.3, Value{Raw: "94.3"}},
+		{"count", 12000000.0, Value{Raw: "12000000"}},
+		{"reads", 593374960.0, Value{Raw: "593374960"}},
+		{"bases", 1104515280.0, Value{Raw: "1104515280"}},
+		{"shortest digits", 0.30000000000000004, Value{Raw: "0.30000000000000004"}},
+		{"smallest plain", 1e-7, Value{Raw: "0.0000001"}},
+		{"below plain", 1e-8, Value{Raw: "1e-08"}},
 		{"large float", 1e21, Value{Raw: "1e+21"}},
+		{"largest plain", 9.999e20, Value{Raw: "999900000000000000000"}},
+		{"negative count", -12000000.0, Value{Raw: "-12000000"}},
+		{"negative zero", math.Copysign(0, -1), Value{Raw: "0"}},
 		{"negative integer", int64(-7), Value{Raw: "-7"}},
 		{"nil", nil, Value{IsNull: true}},
 		{"string", "abc", Value{Raw: "abc"}},
@@ -54,6 +64,9 @@ func TestCanonical(t *testing.T) {
 		{"INTEGER", "01", "1"},
 		{"REAL", "94.30", "94.3"},
 		{"REAL", "5", "5"},
+		{"REAL", "12000000.0", "12000000"},
+		{"REAL", "1.2e7", "12000000"},
+		{"REAL", "1e19", "10000000000000000000"},
 		{"TEXT", "01", "01"},
 		{"DATETIME", "2026-11-06 12:00:00", "2026-11-06 12:00:00"},
 	}
