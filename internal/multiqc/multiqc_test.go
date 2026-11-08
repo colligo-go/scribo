@@ -5,19 +5,24 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/colligo-go/scribo/internal/exitcode"
 )
 
-func fixture(t *testing.T) *Report {
-	t.Helper()
+var readFixture = sync.OnceValues(func() (*Report, error) {
 	file, err := os.Open("../../testdata/multiqc/multiqc_data.json")
 	if err != nil {
-		t.Fatal(err)
+		return nil, err
 	}
 	defer file.Close()
-	report, err := Read(file)
+	return Read(file)
+})
+
+func fixture(t *testing.T) *Report {
+	t.Helper()
+	report, err := readFixture()
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -29,8 +29,10 @@ scribo/
 ├── internal/
 │   ├── db/
 │   │   ├── backend.go
+│   │   ├── definition.go
 │   │   ├── sqlite/
 │   │   │   ├── sqlite.go
+│   │   │   ├── ddl.go
 │   │   │   ├── tx.go
 │   │   │   ├── open.go
 │   │   │   └── fsdetect.go
@@ -49,6 +51,8 @@ scribo/
 │   ├── multiqc/
 │   │   ├── multiqc.go
 │   │   └── table.go
+│   ├── schema/
+│   │   └── schema.go
 │   ├── ingest/
 │   │   └── somalier.go
 │   ├── stats/
@@ -525,7 +529,7 @@ Exit code 0 if nothing is stale, 3 if there are stale items.
 
 `scribo help exit-codes` prints the table of §12 with one line of meaning per code, for whoever writes a pipeline around Scribo. It is generated from one registry, `exitcode.Codes`, and a test keeps that registry and the `Typed codes:` list of §12 identical. `--version` prints `scribo <version> (commit <sha>, <go version>)` on stdout.
 
-A missing column or table gets a suggestion, compared without regard to case: `did you mean "rnaseq_qc"?` for the closest name within edit distance 2 (a tie goes to the alphabetically first); failing that, for the one name the given text is a prefix of (`rnaseq` → `rnaseq_qc`, but not when it is a prefix of two or more); otherwise the list of names, at most 20. A missing column is `column_not_found` with the columns of the table. A missing table is `table_not_found` with the list of data tables (reserved ones left out, at most 20), or `the database has no data table yet` when there is none. `Backend.Tables` lists every table; the command layer leaves out the reserved ones. The context of an error never names a command that does not exist yet.
+A missing column or table gets a suggestion, compared without regard to case: `did you mean "rnaseq_qc"?` for the closest name within edit distance 2 (a tie goes to the alphabetically first); failing that, for the one name the given text is a prefix of (`rnaseq` → `rnaseq_qc`, but not when it is a prefix of two or more); otherwise the list of names, at most 20. A missing column is `column_not_found` with the columns of the table. A missing table is `table_not_found` with the list of data tables (reserved ones left out, at most 20), or `the database has no data table yet` when there is none; both end with `; scribo schema prints the CREATE TABLE of a new one`, which a near match (`did you mean`) leaves out. `Backend.Tables` lists every table; the command layer leaves out the reserved ones. The context of an error never names a command that does not exist yet.
 
 ### upsert
 
@@ -598,18 +602,43 @@ Formats:
 
 `--with-staleness` adds the `_stale` column computed from the graph (Slice 3).
 
+### Reading a MultiQC report
+
+`internal/multiqc` reads `multiqc_data.json` as written by MultiQC 1.30, streamed through `json.Decoder` with `UseNumber`, so a number keeps the text MultiQC wrote. A file that is not one JSON object, or that has no `report_general_stats_data` object of groups of samples of fields → `invalid_format`, exit 4, with the byte offset of a JSON error.
+
+- **Source of the values.** `report_general_stats_data`, `group → sample → field → value`, which holds every raw field of each module, already flat. `report_general_stats_headers`, `group → metric → {…}`, says which metrics General Statistics shows, and its `namespace` names the module. `report_saved_raw_data.multiqc_general_stats` holds values scaled for display (STAR's `total_reads` in millions) and is never read. `report_saved_raw_data.multiqc_<module>` is read only to find a tool version.
+- **Module of a group.** The `namespace` of any header of the group, in lower case; a group without headers or namespace is its own module. MultiQC splits a module into several groups (`salmon` and `salmon_3`, both `Salmon`).
+- **Value of a field.** A number → its JSON text; a string → the text; a boolean → `true` or `false`, as text; `null` → no value. A field whose value is an object or a list in any sample is left out and listed in the `metrics_skipped` warning.
+- **General Statistics.** For each group, the metrics of its headers, with the values of its data, as columns `<module>.<metric>`. The prefix is always there, so adding a module later never renames a column. A metric listed in the headers that no sample has is no column.
+- **One module** (`--module NAME`, compared without regard to case). The data of every group of the module, merged by sample, as columns named by the field, verbatim. The same field in two groups of the module: equal values give one; different values → `invalid_format`, `salmon and salmon_3 disagree on num_compatible_fragments for DRR016125_quant`. A module the report does not have → `module_not_found`, exit 4, listing the modules.
+- **Tool version**, one per sample, with `--module` only. The field `<module>_version` of the general data when it is there (it is then no metric column: `cutadapt_version`, `salmon_version`); otherwise the first key named exactly `<module>_version` with a text value in `report_saved_raw_data.multiqc_<module>.<sample>`, searched depth first with the keys of each object in byte order (fastp keeps it in `summary.fastp_version`). STAR and FastQC record no version in this file.
+
+The raw per-module data is never flattened into columns: fastp alone gives 4158 keys there, 4096 of them k-mer counts, and its adapter counts are keyed by sequences that change from sample to sample. Such a table would pass SQLite's limit of 2000 columns, and a column named after one sample's adapter would make the next sample's ingest fail.
+
 ### schema
 
 ```
-scribo schema --from file.tsv --table T [--key K]...
-scribo schema --from-multiqc multiqc_data.json --table T
+scribo schema --from-multiqc multiqc_data.json --table T [--module NAME]
+scribo schema --from file.tsv --table T --key K...
 ```
 
-Prints the `CREATE TABLE`. It does not execute.
+Prints the `CREATE TABLE` on stdout. It opens no database and executes nothing: `--db` is ignored, and a path that does not exist is no error. The statement comes from `sqlite.CreateTable`, with every identifier quoted by the backend's `quoteIdent`:
 
-`--from-multiqc` reads the General Statistics table by default; `--module NAME` (for example `fastp`, `cutadapt`, `star`) reads that module's full per-sample data instead, one table per tool. The generated table always has `sample TEXT NOT NULL` and `UNIQUE(sample)`, so it satisfies the key rule (§4), and, with `--module`, a `tool_version TEXT` column.
+```sql
+CREATE TABLE "fastp_qc" (
+  "sample" TEXT NOT NULL,
+  "tool_version" TEXT,
+  "after_filtering_total_reads" REAL,
+  ...
+  UNIQUE ("sample")
+) STRICT;
+```
 
-Column names are the MultiQC metric keys verbatim, as quoted identifiers (`"after_filtering.q30_rate"`, `"percent_duplication"`): no renaming, so the mapping is injective and a re-ingest finds the same columns. Types come from the values in the file: integers → `INTEGER`, other numbers → `REAL`, anything else → `TEXT`.
+`--from-multiqc` reads `multiqc_data.json` of MultiQC 1.30 (§10, *Reading a MultiQC report*). By default the table holds the General Statistics: `"sample" TEXT NOT NULL`, then one column per metric, named `<module>.<metric>` and sorted by bytes. `--module NAME` holds that module's per-sample fields instead, named verbatim without a prefix: `"sample" TEXT NOT NULL`, `"tool_version" TEXT`, then the fields sorted by bytes. Either way the table ends in `UNIQUE ("sample")`, so it satisfies the key rule (§4). The same input always prints the same bytes.
+
+`--from` reads a TSV: the header on the first line, cells split at each tab, no escape decoded, a trailing CR removed from each line. `--key` is required (usage error otherwise), names a header column (`column_not_found`, exit 2, with a suggestion, otherwise), may be repeated, and each key column is `NOT NULL` and goes into the `UNIQUE` constraint in the order given. Columns keep the order of the header. A line with more or fewer cells than the header → `invalid_format`, exit 4, naming the line. A column's type follows the rule below, over its non-empty cells; a column with none is `TEXT`.
+
+A column is `INTEGER` when every value is an integer literal that fits in 64 bits, `REAL` when every value is a number and at least one is not such an integer, `TEXT` when any value is text (a JSON string or boolean, or a TSV cell that is not a decimal literal of §7), and `TEXT` when there is no value at all. In JSON the rule reads the text of the number: `593374960.0` is `REAL`, never `INTEGER`. Two columns whose names differ only in case → `invalid_format`, exit 4: SQLite would refuse the table. A reserved table name (§10, upsert) → `reserved_table`.
 
 ### ingest
 

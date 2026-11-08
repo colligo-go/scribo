@@ -116,7 +116,7 @@ func TestMissingTableSuggestsANearbyOne(t *testing.T) {
 		t.Errorf("stderr = %q, want the suggestion", got.Stderr)
 	}
 	if strings.Contains(got.Stderr, "schema") {
-		t.Errorf("stderr = %q, must not name a command that does not exist yet", got.Stderr)
+		t.Errorf("stderr = %q, a near match needs no hint about creating a table", got.Stderr)
 	}
 }
 
@@ -127,7 +127,7 @@ func TestMissingTableListsTheDataTablesOnly(t *testing.T) {
 	got := runScribo(t, "log", "--db", path, "--table", "zzzzzzzzzz", "--key", "a=1")
 
 	requireFailure(t, got, 2, "table_not_found")
-	if !strings.Contains(got.Stderr, "→ tables: rnaseq_qc, samples_extra\n") {
+	if !strings.Contains(got.Stderr, "→ tables: rnaseq_qc, samples_extra; scribo schema prints the CREATE TABLE of a new one\n") {
 		t.Errorf("stderr = %q, want the data tables without the reserved samples", got.Stderr)
 	}
 }
@@ -139,7 +139,7 @@ func TestMissingTableOnAnEmptyDatabase(t *testing.T) {
 	got := runScribo(t, "log", "--db", path, "--table", "x", "--key", "a=1")
 
 	requireFailure(t, got, 2, "table_not_found")
-	if !strings.Contains(got.Stderr, "→ the database has no data table yet\n") {
+	if !strings.Contains(got.Stderr, "→ the database has no data table yet; scribo schema prints the CREATE TABLE of a new one\n") {
 		t.Errorf("stderr = %q", got.Stderr)
 	}
 }
