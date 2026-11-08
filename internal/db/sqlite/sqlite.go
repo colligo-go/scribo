@@ -74,7 +74,7 @@ func (b *Backend) Open(ctx context.Context, path string, opts db.OpenOptions) er
 		translated := translate(err)
 		var domain *exitcode.Error
 		if errors.As(translated, &domain) {
-			return domain
+			return withPath(domain, absPath)
 		}
 		return classifyFileError(translated, absPath)
 	}
@@ -82,9 +82,21 @@ func (b *Backend) Open(ctx context.Context, path string, opts db.OpenOptions) er
 
 	if err := b.checkTable(ctx, "tool_runs", contract.ToolRunsDDL, "CONTRACT.md"); err != nil {
 		b.Close()
-		return translate(err)
+		translated := translate(err)
+		var domain *exitcode.Error
+		if errors.As(translated, &domain) {
+			return withPath(domain, absPath)
+		}
+		return translated
 	}
 	return nil
+}
+
+func withPath(err *exitcode.Error, path string) *exitcode.Error {
+	if err.Context != "" {
+		return err
+	}
+	return exitcode.New(err.Status, err.Code, err.Message, path)
 }
 
 func (b *Backend) Close() error {
