@@ -51,9 +51,15 @@ func Read(r io.Reader) (*Report, error) {
 	decoder.UseNumber()
 	var top map[string]any
 	if err := decoder.Decode(&top); err != nil {
+		if readFailure(err) {
+			return nil, err
+		}
 		return nil, invalidJSON(decoder, err)
 	}
 	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
+		if err != nil && readFailure(err) {
+			return nil, err
+		}
 		return nil, invalidFormat(fmt.Sprintf("unexpected data after the JSON object at byte %d", decoder.InputOffset()))
 	}
 
@@ -235,6 +241,13 @@ func sortedKeys(object map[string]any) []string {
 	return keys
 }
 
+func readFailure(err error) bool {
+	var syntax *json.SyntaxError
+	var typeErr *json.UnmarshalTypeError
+	return !errors.As(err, &syntax) && !errors.As(err, &typeErr) &&
+		!errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF)
+}
+
 func invalidJSON(decoder *json.Decoder, err error) *exitcode.Error {
 	var syntax *json.SyntaxError
 	var typeErr *json.UnmarshalTypeError
@@ -243,10 +256,8 @@ func invalidJSON(decoder *json.Decoder, err error) *exitcode.Error {
 		return invalidFormat(fmt.Sprintf("invalid JSON at byte %d: %v", syntax.Offset, err))
 	case errors.As(err, &typeErr):
 		return invalidFormat(fmt.Sprintf("the file is not a JSON object (byte %d)", typeErr.Offset))
-	case errors.Is(err, io.EOF), errors.Is(err, io.ErrUnexpectedEOF):
-		return invalidFormat(fmt.Sprintf("the JSON ends early, at byte %d", decoder.InputOffset()))
 	}
-	return invalidFormat(fmt.Sprintf("invalid JSON at byte %d: %v", decoder.InputOffset(), err))
+	return invalidFormat(fmt.Sprintf("the JSON ends early, at byte %d", decoder.InputOffset()))
 }
 
 func invalidFormat(message string) *exitcode.Error {
