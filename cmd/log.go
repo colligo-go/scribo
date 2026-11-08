@@ -121,22 +121,32 @@ func parseLog(options *globalOptions, keys []string, field, at, format string, w
 		WithRuns:    withRuns,
 		BusyTimeout: options.busyTimeout,
 	}
+	request.At, request.AtRun, err = parseAt(at)
+	if err != nil {
+		return reader.LogRequest{}, err
+	}
+	return request, nil
+}
+
+func parseAt(at string) (string, int64, error) {
 	if text, isRun := strings.CutPrefix(at, "run:"); isRun {
 		id, err := strconv.ParseInt(text, 10, 64)
 		if err != nil || id <= 0 {
-			return reader.LogRequest{}, usageFor("log", "--at %q needs a run id greater than zero, such as run:7", at)
+			return "", 0, usageFor("log", "--at %q needs a run id greater than zero, such as run:7", at)
 		}
-		request.AtRun = id
-		return request, nil
+		return "", id, nil
 	}
-	if at != "" {
-		parsed, err := time.Parse(time.RFC3339Nano, at)
-		if err != nil {
-			return reader.LogRequest{}, usageFor("log", "--at %q is not an RFC 3339 timestamp such as 2026-11-06T12:00:00Z, nor run:N", at)
-		}
-		request.At = parsed.UTC().Truncate(time.Millisecond).Format(timestampLayout)
+	if at == "" {
+		return "", 0, nil
 	}
-	return request, nil
+	parsed, err := time.Parse(time.RFC3339Nano, at)
+	if err != nil {
+		return "", 0, usageFor("log", "--at %q is not an RFC 3339 timestamp such as 2026-11-06T12:00:00Z, nor run:N", at)
+	}
+	if year := parsed.UTC().Year(); year < 0 || year > 9999 {
+		return "", 0, usageFor("log", "--at %q falls outside the years 0000 to 9999 in UTC", at)
+	}
+	return parsed.UTC().Truncate(time.Millisecond).Format(timestampLayout), 0, nil
 }
 
 func writeLog(out io.Writer, result reader.LogResult, state bool, name string, withRuns bool) error {

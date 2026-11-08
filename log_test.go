@@ -194,7 +194,7 @@ func TestLogRefusesAmbiguousMoments(t *testing.T) {
 	t.Parallel()
 	path := seeded(t)
 
-	for _, at := range []string{"2026-11-06", "ontem"} {
+	for _, at := range []string{"2026-11-06", "ontem", "9999-12-31T23:59:59-23:59", "0000-01-01T00:00:00+00:01"} {
 		requireFailure(t, logS1(t, path, "--at", at), 1, "usage")
 	}
 }
