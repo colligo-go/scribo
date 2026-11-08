@@ -15,11 +15,17 @@ func Suggestion(name string, columns []string) string {
 	return suggestFrom("columns", name, columns)
 }
 
+const schemaHint = "scribo schema prints the CREATE TABLE of a new one"
+
 func TableSuggestion(name string, tables []string) string {
 	if len(tables) == 0 {
-		return "the database has no data table yet"
+		return "the database has no data table yet; " + schemaHint
 	}
-	return suggestFrom("tables", name, tables)
+	suggestion := suggestFrom("tables", name, tables)
+	if strings.HasPrefix(suggestion, "did you mean") {
+		return suggestion
+	}
+	return suggestion + "; " + schemaHint
 }
 
 func suggestFrom(label, name string, candidates []string) string {

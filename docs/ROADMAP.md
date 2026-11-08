@@ -1,6 +1,6 @@
 # Scribo — Roadmap
 
-> **Current slice: 2 — Reading and entry door.** Slices 0 and 1 are closed: Scribo writes values with a per-field history in one transaction, reconciles changes made outside it and reads the history back with `log --at`. Nothing outside Slice 2 should be built yet.
+> **Current slice: 3 — Integration with Colligo.** Slices 0, 1 and 2 are closed: Scribo writes values with a per-field history in one transaction, reconciles changes made outside it, reads the data and the history back, and imports a MultiQC report in one transaction. Slice 3 depends on Colligo's Slice 3 (`samples`, `files`, `facts`). Nothing outside Slice 3 should be built yet.
 
 The rule of this document: a thin slice end to end before breadth.
 
@@ -49,7 +49,7 @@ Outcome (2026-11-06): `upsert` and `log --at` work end to end on SQLite opened p
 
 ---
 
-## Slice 2 — Reading and entry door (current)
+## Slice 2 — Reading and entry door (closed)
 
 Scope:
 
@@ -61,13 +61,17 @@ Scope:
 Criterion:
 
 - A partial key is refused with `key_mismatch` and the history of the record stays in one `record_key`.
-- A real `multiqc_data.json` from nf-core/rnaseq becomes a table by `schema --from-multiqc | sqlite3` and is imported by `ingest multiqc` in one transaction; `query` returns the metrics; `--where "field>90"` against a column without a type fails with a clear message.
+- A real `multiqc_data.json` from nf-core/rnaseq becomes a table by `schema --from-multiqc | sqlite3` and is imported by `ingest multiqc` in one transaction; `query` returns the metrics; `--where "field>90"` against a column without a type fails with a clear message. The fixture that meets it is real MultiQC 1.30 output over MultiQC's own test data (`testdata/multiqc/`), not an nf-core/rnaseq run; a run of nf-core/rnaseq joins it as a second fixture when one is available.
 - `--module fastp` of the same file gives a `fastp_qc` table with the reads before and after trimming and the fastp version.
 - Ctrl-C during an upsert leaves the data and its history as they were and the run closed with `interrupted`.
 
+Outcome (2026-11-08): the key rule, `query`, `export`, `log --format pretty`, `--with-runs`, `--at run:N` and `upsert --dry-run` read the ledger back; `schema` prints a STRICT table for a MultiQC report or a TSV, and `ingest multiqc` writes a whole report, General Statistics or one module with its tool version, in one run and one transaction. Each criterion is covered by a test (PR #18).
+
 ---
 
-## Slice 3 — Integration with Colligo
+## Slice 3 — Integration with Colligo (current)
+
+It depends on Colligo's Slice 3: a store with `samples`, `files` and `facts`.
 
 The thesis of the project. It requires Colligo at its Slice 3 (store with `samples`, `files`, `facts`).
 

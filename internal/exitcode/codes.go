@@ -47,6 +47,7 @@ var Codes = []CodeInfo{
 	{CodeFileNotFound, File, "the database or another file does not exist"},
 	{CodeInvalidFormat, File, "the file is not in the expected format"},
 	{CodeFileExists, File, "the output file exists and --overwrite was not given"},
+	{CodeModuleNotFound, File, "the MultiQC report has no such module"},
 	{CodeBatchFailed, File, "a line of the batch failed; nothing was written"},
 	{CodeDBBusy, System, "another process holds the write lock"},
 	{CodePermissionDenied, System, "the file cannot be read or written"},
@@ -60,4 +61,5 @@ var Codes = []CodeInfo{
 	{CodeHistoryReconciled, WarningStatus, "a change made outside Scribo was found and recorded"},
 	{CodeHistoryApproximate, WarningStatus, "the state at that moment is approximate"},
 	{CodeToolVersionUnknown, WarningStatus, "the file does not record the tool version"},
+	{CodeMetricsSkipped, WarningStatus, "metrics that are objects or lists were left out"},
 }

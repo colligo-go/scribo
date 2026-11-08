@@ -50,6 +50,8 @@ const (
 	CodeRunNotFound        = "run_not_found"
 	CodeToolVersionUnknown = "tool_version_unknown"
 	CodeFileExists         = "file_exists"
+	CodeModuleNotFound     = "module_not_found"
+	CodeMetricsSkipped     = "metrics_skipped"
 )
 
 type Error struct {

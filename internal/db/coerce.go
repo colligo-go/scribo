@@ -24,8 +24,11 @@ var (
 //
 // A real NULL becomes nil. A numeric column (INTEGER or REAL affinity, or a
 // NUMERIC column declared as NUMERIC or DECIMAL) takes a number: int64 when
-// the text is an integer, float64 otherwise, and anything that is not a plain
-// decimal literal is an invalid_value error. Every other column, dates and
+// the text is an integer that fits in 64 bits, float64 otherwise, and
+// anything that is not a plain decimal literal is an invalid_value error. An
+// INTEGER column refuses an integer that overflows; a REAL or NUMERIC column
+// reads it as a float, since Render writes a float such as 1e19 as the plain
+// "10000000000000000000" and that text must be accepted back. Every other column, dates and
 // booleans included, takes the text unchanged: SQLite gives DATE, DATETIME
 // and BOOLEAN columns NUMERIC affinity only by elimination, and refusing a
 // date for not being a number would be wrong.

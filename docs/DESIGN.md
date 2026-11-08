@@ -122,11 +122,13 @@ Colligo does not align reads, by decision. But the pipeline does, and Scribo sto
 
 ### MultiQC is the entry door
 
-`scribo ingest multiqc multiqc_data.json` imports the general per-sample metrics into the declared table. Everyone who runs nf-core already has this file: Scribo is useful in the first minute, without changing the pipeline. The table must exist; `schema --from-multiqc` generates the DDL for review.
+`scribo ingest multiqc multiqc_data.json` imports the general per-sample metrics into the declared table. Everyone who runs nf-core already has this file: Scribo is useful in the first minute, without changing the pipeline. The table must exist; `schema --from-multiqc` generates the DDL for review. A report is written whole or not at all: every sample in one transaction and one run, so a value refused in the last sample leaves no first sample behind, and a column the table lacks is refused for the whole report, listing every missing column at once, rather than dropped in silence.
 
 ### Results of trimming and QC come in through MultiQC modules
 
-The General Statistics table of MultiQC is a summary: a few columns per tool. What a trimming step did — reads before and after, reads cut by adapter, by quality, by length — lives in each module's own data in the same JSON. `--module NAME` imports it, one table per tool, with the tool's version in a `tool_version` column, so `diff` can tell a change of fastp from a change of input. Metric keys become column names verbatim: any renaming rule is a mapping that can collide or change between versions. Sample names are taken verbatim too: stripping `_R1` or `_trimmed` by guessing merges two samples when the guess is wrong.
+The General Statistics table of MultiQC is a summary: a few columns per tool. What a trimming step did — reads before and after, reads cut by adapter, by quality, by length — lives in each module's own data in the same JSON. `--module NAME` imports it, one table per tool, with the tool's version in a `tool_version` column, so `diff` can tell a change of fastp from a change of input. Metric keys become column names verbatim: any renaming rule is a mapping that can collide or change between versions.
+
+The per-sample fields come from `report_general_stats_data`, where MultiQC 1.30 keeps every raw field of each module already flat (fastp: 20 fields, reads before and after filtering included), not from flattening the full per-module data under `report_saved_raw_data`. That data was the first plan, and the real file refused it: fastp gives 4158 keys there, 4096 of them k-mer counts, past SQLite's limit of 2000 columns, and its adapter counts are keyed by adapter sequences that differ between samples, so a table made from one run would not take the next. The full data is still read for one thing, the tool version when the general fields lack it (fastp's `summary.fastp_version`). The General Statistics columns carry a `<module>.` prefix because two tools may name a metric alike and a module added later must not rename a column; a `--module` table needs no prefix, being one tool's. Sample names are taken verbatim too: stripping `_R1` or `_trimmed` by guessing merges two samples when the guess is wrong.
 
 Scribo does not parse fastp, cutadapt or FastQC itself. MultiQC already reads more than a hundred tools; a second parser per tool would be a worse copy of it.
 
@@ -164,7 +166,7 @@ Chronological ordering is always `(changed_at, id)`.
 
 ### `schema` generates, it does not create
 
-`scribo schema --from file.tsv` and `--from-multiqc` **print** the `CREATE TABLE`. Scribo never creates a data table.
+`scribo schema --from file.tsv` and `--from-multiqc` **print** the `CREATE TABLE`. Scribo never creates a data table. The DDL is deterministic, so it can be versioned and reviewed in a diff, and `STRICT`, so the types it chose are enforced. Every numeric column it prints is `REAL`, never `INTEGER`. Inferring a type from the values of one report is guessing: an `INTEGER` inferred from `0` in every sample refuses the `12.5` of the next run, and one inferred from `35` refuses a mean of `35.29`. `REAL` holds every integer up to 2^53 exactly, and since floats render in plain decimal (SPEC §7), a count still reads `593374960`. Nothing is lost, and no later report is refused by a guess; whoever wants `INTEGER` edits the DDL, which `schema` prints for review.
 
 ### `--where` filters: basic operators, not SQL
 

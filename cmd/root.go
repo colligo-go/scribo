@@ -38,6 +38,8 @@ func newRootCommand() *cobra.Command {
 	root.AddCommand(newLogCommand(options))
 	root.AddCommand(newQueryCommand(options))
 	root.AddCommand(newExportCommand(options))
+	root.AddCommand(newSchemaCommand(options))
+	root.AddCommand(newIngestCommand(options))
 	root.AddCommand(newExitCodesTopic())
 	root.SetVersionTemplate("scribo {{.Version}}\n")
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {

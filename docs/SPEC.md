@@ -29,8 +29,10 @@ scribo/
 ├── internal/
 │   ├── db/
 │   │   ├── backend.go
+│   │   ├── definition.go
 │   │   ├── sqlite/
 │   │   │   ├── sqlite.go
+│   │   │   ├── ddl.go
 │   │   │   ├── tx.go
 │   │   │   ├── open.go
 │   │   │   └── fsdetect.go
@@ -46,8 +48,12 @@ scribo/
 │   │   └── graph.go
 │   ├── rules/
 │   │   └── rules.go
-│   ├── ingest/
+│   ├── multiqc/
 │   │   ├── multiqc.go
+│   │   └── table.go
+│   ├── schema/
+│   │   └── schema.go
+│   ├── ingest/
 │   │   └── somalier.go
 │   ├── stats/
 │   │   └── robust.go
@@ -385,7 +391,7 @@ Error from 11 on → Rollback, message on stderr, appropriate exit code, `EndRun
 
 An error before 10 writes nothing. An error from 11 on leaves the data table, its history, `result_inputs` and `input_signals` as they were, and exactly one new `tool_runs` row with a non-zero `exit_code`: the failed run is recorded, its effects are not. The one exception is the `suspect` signal of a violated invariant (§8), stored on purpose in a transaction of its own.
 
-`--batch` iterates the lines inside the same transaction. An error on any line → total ROLLBACK, message naming the line.
+`--batch` iterates the lines inside the same transaction. An error on any line → total ROLLBACK, message naming the line. `ingest multiqc` (§10) already writes this way, through `writer.UpsertMany`: steps 1–8 for every record, then one run and one transaction for all of them; a single `upsert` is `UpsertMany` with one record.
 
 `--dry-run` runs steps 1–8, skips 9 and 10, and runs 11–15 inside a transaction that ends in Rollback: it creates no contract table and no `{table}_history`, begins no run and appends no history, so it writes nothing at all, `tool_runs` included. It still takes the write lock, so the state it reads is the one a write would find. It prints the `FieldChange` it would record on stdout, the reconciled ones first and then its own, as a header `source  field  old_value  old_is_null  new_value  new_is_null` and one line per change with the escaping of `log`; no change → the header alone. `--format json` prints one object per line, `{"source":…,"field":…,"old":"x"|null,"new":"y"|null}`. It fails with the errors and exit codes of the write (`key_already_exists`, `invalid_value`…). The `history_reconciled` warning is not printed: the reconciliation is in the output, with `source` `reconciled`. With rules (§8, Slice 3) it will also report the rules evaluated.
 
@@ -432,8 +438,8 @@ There is no magic value: a typed `null` is text. A real NULL only through `--nul
 
 - A numeric column is one with `INTEGER` or `REAL` affinity, or a `NUMERIC` column declared as `NUMERIC` or `DECIMAL`. `DATE`, `DATETIME`, `TIMESTAMP`, `BOOLEAN` and every other type that is `NUMERIC` only by elimination in SQLite's affinity rules are text: a date in text must never become `invalid_value` for not being a number.
 - The affinity of a declared type follows the order of SQLite's own rules (`sqlite.org/datatype3.html` §3.1): contains `INT` → `INTEGER`; `CHAR`, `CLOB` or `TEXT` → `TEXT`; `BLOB` or no type → `BLOB`; `REAL`, `FLOA` or `DOUB` → `REAL`; otherwise `NUMERIC`. `ANY`, the flexible type of a `STRICT` table, is `BLOB`.
-- The accepted literal is `[+-]?(digits[.digits*]|.digits)([eE][+-]?digits)?`, checked by a regular expression before `strconv` sees the text. `strconv.ParseFloat` alone would accept `NaN`, `Inf`, `0x1A` and `1_000`; those, a leading or trailing space and the empty text are `invalid_value`. An `INTEGER` column takes only `[+-]?digits` that fit in 64 bits, so `94.3`, `1e3` and an overflow are refused. `REAL` and `NUMERIC` bind an integer text as an integer and any other as a float.
-- What is compared and written to the history is the canonical text of the stored value, not what the user typed: `94.30` over `94.3` in a `REAL` column is no change, and `01` and `1` in an `INTEGER` key are the same record. Integers render in base 10 and floats as the shortest text that reads back as the same number. Negative zero renders as `0`: SQLite compares it equal to zero, and `-0` read back as an integer would give one record two keys. The canonical form is stable — canonicalizing it again gives the same text — and `FuzzCanonicalIsStable` checks that for every column kind.
+- The accepted literal is `[+-]?(digits[.digits*]|.digits)([eE][+-]?digits)?`, checked by a regular expression before `strconv` sees the text. `strconv.ParseFloat` alone would accept `NaN`, `Inf`, `0x1A` and `1_000`; those, a leading or trailing space and the empty text are `invalid_value`. An `INTEGER` column takes only `[+-]?digits` that fit in 64 bits, so `94.3`, `1e3` and an overflow are refused. `REAL` and `NUMERIC` bind an integer text that fits in 64 bits as an integer and any other as a float, an overflowing integer such as `10000000000000000000` included.
+- What is compared and written to the history is the canonical text of the stored value, not what the user typed: `94.30` over `94.3` in a `REAL` column is no change, and `01` and `1` in an `INTEGER` key are the same record. Integers render in base 10. Floats render with the shortest digits that read back as the same number, by the rule of ECMAScript's `Number.prototype.toString`: plain decimal when `1e-7 <= |v| < 1e21` (`12000000.0` → `12000000`, `1e-7` → `0.0000001`), exponent notation outside it (`1e+21`, `1e-08`). A count in a `REAL` column, as MultiQC writes it (`593374960.0`), so never shows up as `5.9337496e+08` in the history, in `query` or in a `record_key`. Negative zero renders as `0`: SQLite compares it equal to zero, and `-0` read back as an integer would give one record two keys. The canonical form is stable — canonicalizing it again gives the same text — and `FuzzCanonicalIsStable` checks that for every column kind.
 
 **Hints for a refused number.** `invalid_value` names the most likely fix in its context line, and never changes what is accepted. The first rule that matches wins:
 
@@ -523,7 +529,7 @@ Exit code 0 if nothing is stale, 3 if there are stale items.
 
 `scribo help exit-codes` prints the table of §12 with one line of meaning per code, for whoever writes a pipeline around Scribo. It is generated from one registry, `exitcode.Codes`, and a test keeps that registry and the `Typed codes:` list of §12 identical. `--version` prints `scribo <version> (commit <sha>, <go version>)` on stdout.
 
-A missing column or table gets a suggestion, compared without regard to case: `did you mean "rnaseq_qc"?` for the closest name within edit distance 2 (a tie goes to the alphabetically first); failing that, for the one name the given text is a prefix of (`rnaseq` → `rnaseq_qc`, but not when it is a prefix of two or more); otherwise the list of names, at most 20. A missing column is `column_not_found` with the columns of the table. A missing table is `table_not_found` with the list of data tables (reserved ones left out, at most 20), or `the database has no data table yet` when there is none. `Backend.Tables` lists every table; the command layer leaves out the reserved ones. The context of an error never names a command that does not exist yet.
+A missing column or table gets a suggestion, compared without regard to case: `did you mean "rnaseq_qc"?` for the closest name within edit distance 2 (a tie goes to the alphabetically first); failing that, for the one name the given text is a prefix of (`rnaseq` → `rnaseq_qc`, but not when it is a prefix of two or more); otherwise the list of names, at most 20. A missing column is `column_not_found` with the columns of the table. A missing table is `table_not_found` with the list of data tables (reserved ones left out, at most 20), or `the database has no data table yet` when there is none; both end with `; scribo schema prints the CREATE TABLE of a new one`, which a near match (`did you mean`) leaves out. `Backend.Tables` lists every table; the command layer leaves out the reserved ones. The context of an error never names a command that does not exist yet.
 
 ### upsert
 
@@ -596,30 +602,60 @@ Formats:
 
 `--with-staleness` adds the `_stale` column computed from the graph (Slice 3).
 
+### Reading a MultiQC report
+
+`internal/multiqc` reads `multiqc_data.json` as written by MultiQC 1.30, streamed through `json.Decoder` with `UseNumber`, so a number keeps the text MultiQC wrote. A file that is not one JSON object, or that has no `report_general_stats_data` object of groups of samples of fields → `invalid_format`, exit 4, with the byte offset of a JSON error.
+
+- **Source of the values.** `report_general_stats_data`, `group → sample → field → value`, which holds every raw field of each module, already flat. `report_general_stats_headers`, `group → metric → {…}`, says which metrics General Statistics shows, and its `namespace` names the module. `report_saved_raw_data.multiqc_general_stats` holds values scaled for display (STAR's `total_reads` in millions) and is never read. `report_saved_raw_data.multiqc_<module>` is read only to find a tool version.
+- **Module of a group.** The `namespace` of any header of the group, in lower case; a group without headers or namespace is its own module. MultiQC splits a module into several groups (`salmon` and `salmon_3`, both `Salmon`).
+- **Value of a field.** A number → its JSON text; a string → the text; a boolean → `true` or `false`, as text; `null` → no value. A field whose value is an object or a list in any sample is left out and listed in the `metrics_skipped` warning.
+- **General Statistics.** For each group, the metrics of its headers, with the values of its data, as columns `<module>.<metric>`. The prefix is always there, so adding a module later never renames a column. A metric listed in the headers that no sample has is no column.
+- **One module** (`--module NAME`, compared without regard to case). The data of every group of the module, merged by sample, as columns named by the field, verbatim. The same field in two groups of the module: equal values give one; different values → `invalid_format`, `salmon and salmon_3 disagree on num_compatible_fragments for DRR016125_quant`. A module the report does not have → `module_not_found`, exit 4, listing the modules.
+- **Tool version**, one per sample, with `--module` only. The field `<module>_version` of the general data when it is there (it is then no metric column: `cutadapt_version`, `salmon_version`); otherwise the first key named exactly `<module>_version` with a text value in `report_saved_raw_data.multiqc_<module>.<sample>`, searched depth first with the keys of each object in byte order (fastp keeps it in `summary.fastp_version`). STAR and FastQC record no version in this file.
+
+The raw per-module data is never flattened into columns: fastp alone gives 4158 keys there, 4096 of them k-mer counts, and its adapter counts are keyed by sequences that change from sample to sample. Such a table would pass SQLite's limit of 2000 columns, and a column named after one sample's adapter would make the next sample's ingest fail.
+
 ### schema
 
 ```
-scribo schema --from file.tsv --table T [--key K]...
-scribo schema --from-multiqc multiqc_data.json --table T
+scribo schema --from-multiqc multiqc_data.json --table T [--module NAME]
+scribo schema --from file.tsv --table T --key K...
 ```
 
-Prints the `CREATE TABLE`. It does not execute.
+Prints the `CREATE TABLE` on stdout. It opens no database and executes nothing: `--db` is ignored, and a path that does not exist is no error. The statement comes from `sqlite.CreateTable`, with every identifier quoted by the backend's `quoteIdent`:
 
-`--from-multiqc` reads the General Statistics table by default; `--module NAME` (for example `fastp`, `cutadapt`, `star`) reads that module's full per-sample data instead, one table per tool. The generated table always has `sample TEXT NOT NULL` and `UNIQUE(sample)`, so it satisfies the key rule (§4), and, with `--module`, a `tool_version TEXT` column.
+```sql
+CREATE TABLE "fastp_qc" (
+  "sample" TEXT NOT NULL,
+  "tool_version" TEXT,
+  "after_filtering_total_reads" REAL,
+  ...
+  UNIQUE ("sample")
+) STRICT;
+```
 
-Column names are the MultiQC metric keys verbatim, as quoted identifiers (`"after_filtering.q30_rate"`, `"percent_duplication"`): no renaming, so the mapping is injective and a re-ingest finds the same columns. Types come from the values in the file: integers → `INTEGER`, other numbers → `REAL`, anything else → `TEXT`.
+`--from-multiqc` reads `multiqc_data.json` of MultiQC 1.30 (§10, *Reading a MultiQC report*). By default the table holds the General Statistics: `"sample" TEXT NOT NULL`, then one column per metric, named `<module>.<metric>` and sorted by bytes. `--module NAME` holds that module's per-sample fields instead, named verbatim without a prefix: `"sample" TEXT NOT NULL`, `"tool_version" TEXT`, then the fields sorted by bytes. Either way the table ends in `UNIQUE ("sample")`, so it satisfies the key rule (§4). The same input always prints the same bytes.
+
+`--from` reads a TSV: the header on the first line, cells split at each tab, no escape decoded, a trailing CR removed from each line. `--key` is required (usage error otherwise), names a header column (`column_not_found`, exit 2, with a suggestion, otherwise), may be repeated, and each key column is `NOT NULL` and goes into the `UNIQUE` constraint in the order given. Columns keep the order of the header. A line with more or fewer cells than the header → `invalid_format`, exit 4, naming the line. A column's type follows the rule below, over its non-empty cells; a column with none is `TEXT`.
+
+A column is `REAL` when every value is a number, `TEXT` when any value is text (a JSON string or boolean, or a TSV cell that is not a decimal literal of §7), and `TEXT` when there is no value at all. `schema` never infers `INTEGER`: a type guessed from the values of one report is a guess, and the next report breaks it — `fastqc.percent_duplicates` is `0` in every sample of the fixture and `12.5` in another run. `REAL` holds every integer up to 2^53 exactly and renders it without a decimal point (§7), so nothing is lost; whoever wants `INTEGER` edits the DDL, which is printed for review. Two columns whose names differ only in case → `invalid_format`, exit 4: SQLite would refuse the table. A reserved table name (§10, upsert) → `reserved_table`.
 
 ### ingest
 
 ```
-scribo ingest multiqc  --db DB --table T multiqc_data.json [--map-sample colligo|as-is]
+scribo ingest multiqc  --db DB --table T multiqc_data.json [--module NAME] [--map-sample colligo|as-is]
 scribo ingest somalier --db DB somalier.pairs.tsv [--relatedness-min 0.8] [--relatedness-max 0.1]
 scribo ingest ngscheckmate --db DB output_all.txt
 ```
 
-`multiqc` reads the general per-sample metrics and upserts them into the table, one transaction for the whole file. `--map-sample colligo` resolves MultiQC sample names against `samples`; a name with no match → `unknown_sample`, nothing stored.
+`ingest multiqc FILE` writes the report read as in *Reading a MultiQC report* to an existing table: the General Statistics by default, the per-sample fields of one module with `--module NAME`. One record per sample, keyed `{sample: <MultiQC sample name>}`, verbatim (`--map-sample as-is`, the default and, in Slice 2, the only mode): no suffix such as `_R1` or `_trimmed` is stripped by guessing, since a wrong guess merges two samples. `--map-sample colligo` (Slice 3) resolves MultiQC sample names against `samples`; a name with no match → `unknown_sample`, nothing stored.
 
-`--module NAME` imports that module's per-sample data into a table made by `schema --from-multiqc --module NAME`. The sample name is MultiQC's, verbatim, with `--map-sample as-is` (the default): no suffix such as `_R1` or `_trimmed` is stripped by guessing, since a wrong guess merges two samples. When the file records the tool's version, it goes to the `tool_version` column of every record; when it does not, the column stays NULL and a `tool_version_unknown` warning says so. Slice 4's `diff` counts a changed `tool_version` column as the cause `tool`.
+- Every sample goes through `writer.UpsertMany`: steps 1–8 of §5 for every record before anything is begun (table, columns, the key rule of §4, so the table needs `UNIQUE ("sample")`, and the coercion of every value), then one `BeginRun`, one transaction in which each record, in sample order, is reconciled, upserted and given its history rows, one `Commit` and one `EndRun`. An error on any sample rolls back every sample and names it, and the metric when there is one: `sample HG003_father, metric "pct_duplication": …`. An error before the run writes nothing at all; an error inside it leaves the one failed run in `tool_runs`, as in §5.
+- Every column the report gives values for must be a column of the table. Missing ones → `column_not_found`, exit 2, listing all of them (`2 columns do not exist in fastp_qc: pct_duplication, pct_surviving`), with the context `regenerate the table with scribo schema or add the columns with ALTER TABLE`; nothing is written. Columns of the table that the report does not have, and samples of the table that it does not list, are left as they are; so is a metric that a sample lacks or gives as `null`.
+- With `--module`, the version of each sample goes to `tool_version`. A sample without a version, in a report that has versions for others, leaves its `tool_version` as it is. A module with no version at all (STAR and FastQC in 1.30) leaves the column NULL on a new record and warns once with `tool_version_unknown`. Slice 4's `diff` counts a changed `tool_version` column as the cause `tool`.
+- Fields left out for being objects or lists produce one `metrics_skipped` warning naming them.
+- The reconciliation of §6 runs per record; its warning is given once, after the commit, naming the records: `fastp_qc: 3 records reconciled: HG001, HG002_son, HG004_mother`.
+- Success prints nothing on stdout; warnings go to stderr. A file that does not exist → `file_not_found`, exit 4, and one that is not a MultiQC report → `invalid_format`, exit 4, both before the database is opened.
 
 There is no parser per tool (fastp, cutadapt, FastQC): MultiQC already reads more than a hundred of them, and its JSON is the one format Scribo follows. A tool MultiQC does not read comes in as TSV, through `schema --from` and `upsert --batch`.
 
@@ -691,9 +727,9 @@ ERROR [<typed_code>]: <main message>
 → <context, line of the error, suggestion>
 ```
 
-Typed codes: `table_not_found`, `column_not_found`, `key_not_found`, `key_already_exists`, `invalid_value`, `untyped_comparison`, `unknown_sample`, `input_not_found`, `invalid_rules`, `invariant_violated`, `rule_unavailable`, `colligo_required`, `contract_mismatch`, `stale_results`, `nondeterministic_change`, `file_not_found`, `invalid_format`, `batch_failed`, `db_busy`, `permission_denied`, `synced_path`, `pragma_ineffective`, `usage`, `internal`, `io_error`, `network_filesystem`, `constraint_failed`, `reserved_table`, `ambiguous_key`, `history_reconciled`, `history_approximate`, `key_mismatch`, `no_unique_key`, `interrupted`, `run_not_found`, `tool_version_unknown`, `file_exists`.
+Typed codes: `table_not_found`, `column_not_found`, `key_not_found`, `key_already_exists`, `invalid_value`, `untyped_comparison`, `unknown_sample`, `input_not_found`, `invalid_rules`, `invariant_violated`, `rule_unavailable`, `colligo_required`, `contract_mismatch`, `stale_results`, `nondeterministic_change`, `file_not_found`, `invalid_format`, `batch_failed`, `db_busy`, `permission_denied`, `synced_path`, `pragma_ineffective`, `usage`, `internal`, `io_error`, `network_filesystem`, `constraint_failed`, `reserved_table`, `ambiguous_key`, `history_reconciled`, `history_approximate`, `key_mismatch`, `no_unique_key`, `interrupted`, `run_not_found`, `tool_version_unknown`, `file_exists`, `module_not_found`, `metrics_skipped`.
 
-New in Slice 2: `key_mismatch` and `no_unique_key` (the key is not exactly one unique key of the table, §4; exit 2), `interrupted` (a signal ended the command, §5; exit 5), `run_not_found` (`log --at run:N` for a run that wrote nothing in the table; exit 3) the warning `tool_version_unknown` (§10, ingest) and `file_exists` (`export --out` to a file that exists, without `--overwrite`; exit 4).
+New in Slice 2: `key_mismatch` and `no_unique_key` (the key is not exactly one unique key of the table, §4; exit 2), `interrupted` (a signal ended the command, §5; exit 5), `run_not_found` (`log --at run:N` for a run that wrote nothing in the table; exit 3), the warning `tool_version_unknown` (§10, ingest), `file_exists` (`export --out` to a file that exists, without `--overwrite`; exit 4), `module_not_found` (`--module` names a module the MultiQC report does not have; exit 4) and the warning `metrics_skipped` (a MultiQC metric whose value is an object or a list was left out, §10).
 
 New in Slice 1: `constraint_failed` (the database refused a value: NOT NULL, UNIQUE, CHECK or a trigger; exit 3), `reserved_table` (the table is one Scribo or Colligo owns, or a `_history` or `sqlite_` table; exit 2), `ambiguous_key` (a key matches more than one record because its columns are not UNIQUE; exit 3), `io_error` (a database error with no more specific code, exit 5) and the warnings `network_filesystem`, `history_reconciled` and `history_approximate` (§6), which never change the exit status.
 
@@ -733,6 +769,6 @@ Mandatory:
 - `stale --samplesheet` generates a valid samplesheet with only the affected samples
 - `diff`: fixture with a change by input, by tool and with no cause; each one attributed correctly
 - `outliers`: a planted sample with a high `z` detected; a small group and zero MAD not evaluated
-- `ingest multiqc` of a real `multiqc_data.json` from nf-core/rnaseq; `ingest somalier` with a swapped pair generates `identity_mismatch`
+- `ingest multiqc` of a real `multiqc_data.json` (today MultiQC 1.30 over MultiQC's test data, `testdata/multiqc/`; an nf-core/rnaseq run joins it as a second fixture); `ingest somalier` with a swapped pair generates `identity_mismatch`
 - restricted: `--debug` refused; loose permission refused; `detail` without a real name
 - leakage: sentinel in path and value absent from `argv_shape`, from `detail` and from all output
