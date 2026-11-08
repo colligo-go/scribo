@@ -210,3 +210,37 @@ func TestEveryBackendFailureOfADryRunIsReturned(t *testing.T) {
 		}
 	}
 }
+
+func TestAFailedWriteWhoseRunCannotBeClosedKeepsItsOwnError(t *testing.T) {
+	base := baseDatabase(t)
+	before := state(t, base)
+	runsBefore := dump(t, base, "SELECT count(*) FROM tool_runs")
+	for failAt := 1; ; failAt++ {
+		path := copyOf(t, base)
+		backend := &dbtest.Failing{Backend: sqlite.New(), FailAt: failAt, FailNamed: "EndRun"}
+		var warnings []string
+
+		err := Upsert(context.Background(), backend, Request{
+			DB: path, Table: "rnaseq_qc",
+			Key:    db.Key{"sample": {Raw: "S1"}, "replicate": {Raw: "1"}},
+			Values: db.Values{"note": {Raw: "b"}},
+		}, func(w exitcode.Warning) { warnings = append(warnings, w.Message) })
+
+		if !backend.Reached() {
+			if err != nil || !strings.Contains(strings.Join(warnings, "|"), "the write was committed") {
+				t.Fatalf("no failure injected but EndRun: error %v, warnings %q", err, warnings)
+			}
+			return
+		}
+		began := dump(t, path, "SELECT count(*) FROM tool_runs") != runsBefore
+		if err == nil || !began {
+			continue
+		}
+		if !errors.Is(err, dbtest.ErrInjected) || state(t, path) != before {
+			t.Errorf("call %d (%s) failed: error %v, or the state changed", failAt, backend.Failed, err)
+		}
+		if want := "could not close run"; !strings.Contains(strings.Join(warnings, "|"), want) {
+			t.Errorf("call %d (%s) failed and EndRun failed too: warnings %q, want %q", failAt, backend.Failed, warnings, want)
+		}
+	}
+}

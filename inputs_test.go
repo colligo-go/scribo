@@ -131,3 +131,34 @@ func TestEveryCommandRefusesAMissingDatabaseWithoutCreatingIt(t *testing.T) {
 	}
 	requireOnlyEntries(t, dir)
 }
+
+func TestKeyValueThatDoesNotFitTheColumnIsInvalid(t *testing.T) {
+	t.Parallel()
+	path := newDB(t, `CREATE TABLE qc (sample TEXT NOT NULL, replicate INTEGER NOT NULL, note TEXT, UNIQUE(sample, replicate)) STRICT`)
+	key := []string{"--key", "sample=S1", "--key", "replicate=abc"}
+
+	for name, args := range map[string][]string{
+		"upsert": append(append([]string{"upsert", "--db", path, "--table", "qc"}, key...), "note=x"),
+		"log":    append([]string{"log", "--db", path, "--table", "qc"}, key...),
+	} {
+		got := runScribo(t, args...)
+		if got.ExitCode != 3 || !strings.Contains(got.Stderr, `ERROR [invalid_value]: replicate is INTEGER and "abc" is not a number`) {
+			t.Errorf("%s: exit %d, stderr %q, want exit 3 invalid_value", name, got.ExitCode, got.Stderr)
+		}
+	}
+	if n := scalar(t, path, "SELECT count(*) FROM sqlite_schema WHERE name = 'tool_runs'"); n != "0" {
+		t.Error("a key refused before the write began a run")
+	}
+}
+
+func TestIngestIntoAMissingTableSuggestsSchema(t *testing.T) {
+	t.Parallel()
+	path := newDB(t, golden(t, generalGolden))
+
+	got := ingest(t, path, "nosuch", multiqcFixture)
+
+	requireFailure(t, got, 2, "table_not_found")
+	if !strings.Contains(got.Stderr, "scribo schema prints the CREATE TABLE of a new one") {
+		t.Errorf("stderr = %q", got.Stderr)
+	}
+}

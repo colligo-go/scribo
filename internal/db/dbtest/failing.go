@@ -12,15 +12,19 @@ var ErrInjected = errors.New("injected failure")
 
 type Failing struct {
 	db.Backend
-	FailAt int
-	Calls  int
-	Failed string
+	FailAt    int
+	FailNamed string
+	Calls     int
+	Failed    string
 }
 
 func (f *Failing) fail(name string) error {
 	f.Calls++
 	if f.Calls == f.FailAt {
 		f.Failed = name
+		return ErrInjected
+	}
+	if name == f.FailNamed {
 		return ErrInjected
 	}
 	return nil
