@@ -50,11 +50,8 @@ jobs:
       - name: Coverage
         run: bash .github/coverage.sh
 
-      - name: Fuzz record_key
-        run: go test -run='^$' -fuzz=FuzzRecordKey -fuzztime=30s ./internal/history
-
-      - name: Fuzz the canonical form
-        run: go test -run='^$' -fuzz=FuzzCanonicalIsStable -fuzztime=30s ./internal/db
+      - name: Fuzz
+        run: bash .github/fuzz.sh 20s
 
       - name: Secrets in history
         run: |
