@@ -46,8 +46,10 @@ scribo/
 │   │   └── graph.go
 │   ├── rules/
 │   │   └── rules.go
-│   ├── ingest/
+│   ├── multiqc/
 │   │   ├── multiqc.go
+│   │   └── table.go
+│   ├── ingest/
 │   │   └── somalier.go
 │   ├── stats/
 │   │   └── robust.go
@@ -691,9 +693,9 @@ ERROR [<typed_code>]: <main message>
 → <context, line of the error, suggestion>
 ```
 
-Typed codes: `table_not_found`, `column_not_found`, `key_not_found`, `key_already_exists`, `invalid_value`, `untyped_comparison`, `unknown_sample`, `input_not_found`, `invalid_rules`, `invariant_violated`, `rule_unavailable`, `colligo_required`, `contract_mismatch`, `stale_results`, `nondeterministic_change`, `file_not_found`, `invalid_format`, `batch_failed`, `db_busy`, `permission_denied`, `synced_path`, `pragma_ineffective`, `usage`, `internal`, `io_error`, `network_filesystem`, `constraint_failed`, `reserved_table`, `ambiguous_key`, `history_reconciled`, `history_approximate`, `key_mismatch`, `no_unique_key`, `interrupted`, `run_not_found`, `tool_version_unknown`, `file_exists`.
+Typed codes: `table_not_found`, `column_not_found`, `key_not_found`, `key_already_exists`, `invalid_value`, `untyped_comparison`, `unknown_sample`, `input_not_found`, `invalid_rules`, `invariant_violated`, `rule_unavailable`, `colligo_required`, `contract_mismatch`, `stale_results`, `nondeterministic_change`, `file_not_found`, `invalid_format`, `batch_failed`, `db_busy`, `permission_denied`, `synced_path`, `pragma_ineffective`, `usage`, `internal`, `io_error`, `network_filesystem`, `constraint_failed`, `reserved_table`, `ambiguous_key`, `history_reconciled`, `history_approximate`, `key_mismatch`, `no_unique_key`, `interrupted`, `run_not_found`, `tool_version_unknown`, `file_exists`, `module_not_found`, `metrics_skipped`.
 
-New in Slice 2: `key_mismatch` and `no_unique_key` (the key is not exactly one unique key of the table, §4; exit 2), `interrupted` (a signal ended the command, §5; exit 5), `run_not_found` (`log --at run:N` for a run that wrote nothing in the table; exit 3) the warning `tool_version_unknown` (§10, ingest) and `file_exists` (`export --out` to a file that exists, without `--overwrite`; exit 4).
+New in Slice 2: `key_mismatch` and `no_unique_key` (the key is not exactly one unique key of the table, §4; exit 2), `interrupted` (a signal ended the command, §5; exit 5), `run_not_found` (`log --at run:N` for a run that wrote nothing in the table; exit 3), the warning `tool_version_unknown` (§10, ingest), `file_exists` (`export --out` to a file that exists, without `--overwrite`; exit 4), `module_not_found` (`--module` names a module the MultiQC report does not have; exit 4) and the warning `metrics_skipped` (a MultiQC metric whose value is an object or a list was left out, §10).
 
 New in Slice 1: `constraint_failed` (the database refused a value: NOT NULL, UNIQUE, CHECK or a trigger; exit 3), `reserved_table` (the table is one Scribo or Colligo owns, or a `_history` or `sqlite_` table; exit 2), `ambiguous_key` (a key matches more than one record because its columns are not UNIQUE; exit 3), `io_error` (a database error with no more specific code, exit 5) and the warnings `network_filesystem`, `history_reconciled` and `history_approximate` (§6), which never change the exit status.
 
