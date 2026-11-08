@@ -391,7 +391,7 @@ Error from 11 on → Rollback, message on stderr, appropriate exit code, `EndRun
 
 An error before 10 writes nothing. An error from 11 on leaves the data table, its history, `result_inputs` and `input_signals` as they were, and exactly one new `tool_runs` row with a non-zero `exit_code`: the failed run is recorded, its effects are not. The one exception is the `suspect` signal of a violated invariant (§8), stored on purpose in a transaction of its own.
 
-`--batch` iterates the lines inside the same transaction. An error on any line → total ROLLBACK, message naming the line.
+`--batch` iterates the lines inside the same transaction. An error on any line → total ROLLBACK, message naming the line. `ingest multiqc` (§10) already writes this way, through `writer.UpsertMany`: steps 1–8 for every record, then one run and one transaction for all of them; a single `upsert` is `UpsertMany` with one record.
 
 `--dry-run` runs steps 1–8, skips 9 and 10, and runs 11–15 inside a transaction that ends in Rollback: it creates no contract table and no `{table}_history`, begins no run and appends no history, so it writes nothing at all, `tool_runs` included. It still takes the write lock, so the state it reads is the one a write would find. It prints the `FieldChange` it would record on stdout, the reconciled ones first and then its own, as a header `source  field  old_value  old_is_null  new_value  new_is_null` and one line per change with the escaping of `log`; no change → the header alone. `--format json` prints one object per line, `{"source":…,"field":…,"old":"x"|null,"new":"y"|null}`. It fails with the errors and exit codes of the write (`key_already_exists`, `invalid_value`…). The `history_reconciled` warning is not printed: the reconciliation is in the output, with `source` `reconciled`. With rules (§8, Slice 3) it will also report the rules evaluated.
 
@@ -643,14 +643,19 @@ A column is `INTEGER` when every value is an integer literal that fits in 64 bit
 ### ingest
 
 ```
-scribo ingest multiqc  --db DB --table T multiqc_data.json [--map-sample colligo|as-is]
+scribo ingest multiqc  --db DB --table T multiqc_data.json [--module NAME] [--map-sample colligo|as-is]
 scribo ingest somalier --db DB somalier.pairs.tsv [--relatedness-min 0.8] [--relatedness-max 0.1]
 scribo ingest ngscheckmate --db DB output_all.txt
 ```
 
-`multiqc` reads the general per-sample metrics and upserts them into the table, one transaction for the whole file. `--map-sample colligo` resolves MultiQC sample names against `samples`; a name with no match → `unknown_sample`, nothing stored.
+`ingest multiqc FILE` writes the report read as in *Reading a MultiQC report* to an existing table: the General Statistics by default, the per-sample fields of one module with `--module NAME`. One record per sample, keyed `{sample: <MultiQC sample name>}`, verbatim (`--map-sample as-is`, the default and, in Slice 2, the only mode): no suffix such as `_R1` or `_trimmed` is stripped by guessing, since a wrong guess merges two samples. `--map-sample colligo` (Slice 3) resolves MultiQC sample names against `samples`; a name with no match → `unknown_sample`, nothing stored.
 
-`--module NAME` imports that module's per-sample data into a table made by `schema --from-multiqc --module NAME`. The sample name is MultiQC's, verbatim, with `--map-sample as-is` (the default): no suffix such as `_R1` or `_trimmed` is stripped by guessing, since a wrong guess merges two samples. When the file records the tool's version, it goes to the `tool_version` column of every record; when it does not, the column stays NULL and a `tool_version_unknown` warning says so. Slice 4's `diff` counts a changed `tool_version` column as the cause `tool`.
+- Every sample goes through `writer.UpsertMany`: steps 1–8 of §5 for every record before anything is begun (table, columns, the key rule of §4, so the table needs `UNIQUE ("sample")`, and the coercion of every value), then one `BeginRun`, one transaction in which each record, in sample order, is reconciled, upserted and given its history rows, one `Commit` and one `EndRun`. An error on any sample rolls back every sample and names it, and the metric when there is one: `sample HG003_father, metric "pct_duplication": …`. An error before the run writes nothing at all; an error inside it leaves the one failed run in `tool_runs`, as in §5.
+- Every column the report gives values for must be a column of the table. Missing ones → `column_not_found`, exit 2, listing all of them (`2 columns do not exist in fastp_qc: pct_duplication, pct_surviving`), with the context `regenerate the table with scribo schema or add the columns with ALTER TABLE`; nothing is written. Columns of the table that the report does not have, and samples of the table that it does not list, are left as they are; so is a metric that a sample lacks or gives as `null`.
+- With `--module`, the version of each sample goes to `tool_version`. A sample without a version, in a report that has versions for others, leaves its `tool_version` as it is. A module with no version at all (STAR and FastQC in 1.30) leaves the column NULL on a new record and warns once with `tool_version_unknown`. Slice 4's `diff` counts a changed `tool_version` column as the cause `tool`.
+- Fields left out for being objects or lists produce one `metrics_skipped` warning naming them.
+- The reconciliation of §6 runs per record; its warning is given once, after the commit, naming the records: `fastp_qc: 3 records reconciled: HG001, HG002_son, HG004_mother`.
+- Success prints nothing on stdout; warnings go to stderr. A file that does not exist → `file_not_found`, exit 4, and one that is not a MultiQC report → `invalid_format`, exit 4, both before the database is opened.
 
 There is no parser per tool (fastp, cutadapt, FastQC): MultiQC already reads more than a hundred of them, and its JSON is the one format Scribo follows. A tool MultiQC does not read comes in as TSV, through `schema --from` and `upsert --batch`.
 
@@ -764,6 +769,6 @@ Mandatory:
 - `stale --samplesheet` generates a valid samplesheet with only the affected samples
 - `diff`: fixture with a change by input, by tool and with no cause; each one attributed correctly
 - `outliers`: a planted sample with a high `z` detected; a small group and zero MAD not evaluated
-- `ingest multiqc` of a real `multiqc_data.json` from nf-core/rnaseq; `ingest somalier` with a swapped pair generates `identity_mismatch`
+- `ingest multiqc` of a real `multiqc_data.json` (today MultiQC 1.30 over MultiQC's test data, `testdata/multiqc/`; an nf-core/rnaseq run joins it as a second fixture); `ingest somalier` with a swapped pair generates `identity_mismatch`
 - restricted: `--debug` refused; loose permission refused; `detail` without a real name
 - leakage: sentinel in path and value absent from `argv_shape`, from `detail` and from all output

@@ -122,7 +122,7 @@ Colligo does not align reads, by decision. But the pipeline does, and Scribo sto
 
 ### MultiQC is the entry door
 
-`scribo ingest multiqc multiqc_data.json` imports the general per-sample metrics into the declared table. Everyone who runs nf-core already has this file: Scribo is useful in the first minute, without changing the pipeline. The table must exist; `schema --from-multiqc` generates the DDL for review.
+`scribo ingest multiqc multiqc_data.json` imports the general per-sample metrics into the declared table. Everyone who runs nf-core already has this file: Scribo is useful in the first minute, without changing the pipeline. The table must exist; `schema --from-multiqc` generates the DDL for review. A report is written whole or not at all: every sample in one transaction and one run, so a value refused in the last sample leaves no first sample behind, and a column the table lacks is refused for the whole report, listing every missing column at once, rather than dropped in silence.
 
 ### Results of trimming and QC come in through MultiQC modules
 

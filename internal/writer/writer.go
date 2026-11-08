@@ -25,19 +25,55 @@ type Request struct {
 	ArgvShape   string
 }
 
+type Record struct {
+	Key    db.Key
+	Values db.Values
+	Name   string
+}
+
+type Batch struct {
+	DB          string
+	Table       string
+	Records     []Record
+	Mode        db.WriteMode
+	BusyTimeout int
+	ArgvShape   string
+	ColumnsHint string
+}
+
 type Change struct {
 	Source db.HistorySource
 	db.FieldChange
 }
 
 type plan struct {
-	columns   map[string]db.Column
+	columns map[string]db.Column
+	records []recordPlan
+}
+
+type recordPlan struct {
+	Record
 	key       db.Key
 	recordKey string
 }
 
 func Upsert(ctx context.Context, backend db.Backend, req Request, warn func(exitcode.Warning)) error {
-	return run.Interrupted(ctx, upsert(ctx, backend, req, warn))
+	return UpsertMany(ctx, backend, req.batch(), warn)
+}
+
+func UpsertMany(ctx context.Context, backend db.Backend, batch Batch, warn func(exitcode.Warning)) error {
+	return run.Interrupted(ctx, upsertMany(ctx, backend, batch, warn))
+}
+
+func (r Request) batch() Batch {
+	return Batch{
+		DB:          r.DB,
+		Table:       r.Table,
+		Records:     []Record{{Key: r.Key, Values: r.Values}},
+		Mode:        r.Mode,
+		BusyTimeout: r.BusyTimeout,
+		ArgvShape:   r.ArgvShape,
+	}
 }
 
 func DryRun(ctx context.Context, backend db.Backend, req Request, warn func(exitcode.Warning)) ([]Change, error) {
@@ -45,8 +81,8 @@ func DryRun(ctx context.Context, backend db.Backend, req Request, warn func(exit
 	return changes, run.Interrupted(ctx, err)
 }
 
-func open(ctx context.Context, backend db.Backend, req Request, warn func(exitcode.Warning)) error {
-	if err := backend.Open(ctx, req.DB, db.OpenOptions{BusyTimeout: req.BusyTimeout}); err != nil {
+func open(ctx context.Context, backend db.Backend, path string, busyTimeout int, warn func(exitcode.Warning)) error {
+	if err := backend.Open(ctx, path, db.OpenOptions{BusyTimeout: busyTimeout}); err != nil {
 		return err
 	}
 	for _, warning := range backend.Warnings() {
@@ -55,40 +91,52 @@ func open(ctx context.Context, backend db.Backend, req Request, warn func(exitco
 	return nil
 }
 
-func prepare(ctx context.Context, backend db.Backend, req Request) (plan, error) {
-	byName, err := validate.Columns(ctx, backend, req.Table, sortedNames(req.Key, req.Values))
+func prepare(ctx context.Context, backend db.Backend, batch Batch) (plan, error) {
+	names := fieldNames(batch.Records)
+	var byName map[string]db.Column
+	var err error
+	if batch.ColumnsHint != "" {
+		byName, err = validate.AllColumns(ctx, backend, batch.Table, names, batch.ColumnsHint)
+	} else {
+		byName, err = validate.Columns(ctx, backend, batch.Table, names)
+	}
 	if err != nil {
 		return plan{}, err
 	}
-	uniqueKeys, err := backend.UniqueKeys(ctx, req.Table)
+	uniqueKeys, err := backend.UniqueKeys(ctx, batch.Table)
 	if err != nil {
 		return plan{}, err
 	}
-	if err := validate.Key(req.Table, uniqueKeys, req.Key); err != nil {
-		return plan{}, err
-	}
-	canonicalKey, err := validate.CanonicalKey(byName, req.Key)
-	if err != nil {
-		return plan{}, err
-	}
-	for name, value := range req.Values {
-		if _, err := db.Coerce(byName[name], value); err != nil {
+
+	p := plan{columns: byName, records: make([]recordPlan, len(batch.Records))}
+	for i, record := range batch.Records {
+		if err := validate.Key(batch.Table, uniqueKeys, record.Key); err != nil {
 			return plan{}, err
 		}
+		canonicalKey, err := validate.CanonicalKey(byName, record.Key)
+		if err != nil {
+			return plan{}, inRecord(record, "", err)
+		}
+		for _, name := range sortedNames(nil, record.Values) {
+			if _, err := db.Coerce(byName[name], record.Values[name]); err != nil {
+				return plan{}, inRecord(record, name, err)
+			}
+		}
+		recordKey, err := history.RecordKey(canonicalKey)
+		if err != nil {
+			return plan{}, inRecord(record, "", err)
+		}
+		p.records[i] = recordPlan{Record: record, key: canonicalKey, recordKey: recordKey}
 	}
-	recordKey, err := history.RecordKey(canonicalKey)
-	if err != nil {
-		return plan{}, err
-	}
-	return plan{columns: byName, key: canonicalKey, recordKey: recordKey}, nil
+	return p, nil
 }
 
-func upsert(ctx context.Context, backend db.Backend, req Request, warn func(exitcode.Warning)) error {
-	if err := open(ctx, backend, req, warn); err != nil {
+func upsertMany(ctx context.Context, backend db.Backend, batch Batch, warn func(exitcode.Warning)) error {
+	if err := open(ctx, backend, batch.DB, batch.BusyTimeout, warn); err != nil {
 		return err
 	}
 	defer backend.Close()
-	p, err := prepare(ctx, backend, req)
+	p, err := prepare(ctx, backend, batch)
 	if err != nil {
 		return err
 	}
@@ -96,7 +144,7 @@ func upsert(ctx context.Context, backend db.Backend, req Request, warn func(exit
 	if err := backend.EnsureContractTables(ctx); err != nil {
 		return err
 	}
-	if err := backend.EnsureHistoryTable(ctx, req.Table); err != nil {
+	if err := backend.EnsureHistoryTable(ctx, batch.Table); err != nil {
 		return err
 	}
 
@@ -104,11 +152,11 @@ func upsert(ctx context.Context, backend db.Backend, req Request, warn func(exit
 		return err
 	}
 
-	runID, err := backend.BeginRun(ctx, run.Meta(req.ArgvShape, ""))
+	runID, err := backend.BeginRun(ctx, run.Meta(batch.ArgvShape, ""))
 	if err != nil {
 		return err
 	}
-	writeErr := run.Interrupted(ctx, write(ctx, backend, req, p, runID, warn))
+	writeErr := run.Interrupted(ctx, write(ctx, backend, batch, p, runID, warn))
 	endCtx, cancel := run.EndContext(ctx)
 	defer cancel()
 	if writeErr != nil {
@@ -124,11 +172,11 @@ func upsert(ctx context.Context, backend db.Backend, req Request, warn func(exit
 }
 
 func dryRun(ctx context.Context, backend db.Backend, req Request, warn func(exitcode.Warning)) ([]Change, error) {
-	if err := open(ctx, backend, req, warn); err != nil {
+	if err := open(ctx, backend, req.DB, req.BusyTimeout, warn); err != nil {
 		return nil, err
 	}
 	defer backend.Close()
-	p, err := prepare(ctx, backend, req)
+	p, err := prepare(ctx, backend, req.batch())
 	if err != nil {
 		return nil, err
 	}
@@ -141,11 +189,12 @@ func dryRun(ctx context.Context, backend db.Backend, req Request, warn func(exit
 		return nil, err
 	}
 	defer tx.Rollback()
-	reconciled, _, err := reconciliation(ctx, tx, req.Table, p)
+	record := p.records[0]
+	reconciled, _, err := reconciliation(ctx, tx, req.Table, p.columns, record)
 	if err != nil {
 		return nil, err
 	}
-	written, err := tx.Upsert(ctx, req.Table, p.key, req.Values, req.Mode)
+	written, err := tx.Upsert(ctx, req.Table, record.key, req.Values, req.Mode)
 	if err != nil {
 		return nil, err
 	}
@@ -163,7 +212,13 @@ func dryRun(ctx context.Context, backend db.Backend, req Request, warn func(exit
 	return changes, nil
 }
 
-func write(ctx context.Context, backend db.Backend, req Request, p plan, runID int64, warn func(exitcode.Warning)) error {
+type reconciledRecord struct {
+	record  recordPlan
+	changes []db.FieldChange
+	deleted bool
+}
+
+func write(ctx context.Context, backend db.Backend, batch Batch, p plan, runID int64, warn func(exitcode.Warning)) error {
 	tx, err := backend.BeginTx(ctx)
 	if err != nil {
 		return err
@@ -171,41 +226,59 @@ func write(ctx context.Context, backend db.Backend, req Request, p plan, runID i
 	defer tx.Rollback()
 	at := time.Now()
 
-	reconciled, deleted, err := reconciliation(ctx, tx, req.Table, p)
-	if err != nil {
-		return err
-	}
-	if len(reconciled) > 0 {
-		if err := tx.AppendHistory(ctx, req.Table, p.recordKey, reconciled, runID, at, db.SourceReconciled); err != nil {
-			return err
+	var found []reconciledRecord
+	for _, record := range p.records {
+		reconciled, deleted, err := writeRecord(ctx, tx, batch, p.columns, record, runID, at)
+		if err != nil {
+			return inRecord(record.Record, "", err)
 		}
-	}
-
-	changes, err := tx.Upsert(ctx, req.Table, p.key, req.Values, req.Mode)
-	if err != nil {
-		return err
-	}
-	if len(changes) > 0 {
-		if err := tx.AppendHistory(ctx, req.Table, p.recordKey, changes, runID, at, db.SourceScribo); err != nil {
-			return err
+		if len(reconciled) > 0 {
+			found = append(found, reconciledRecord{record: record, changes: reconciled, deleted: deleted})
 		}
 	}
 	if err := tx.Commit(); err != nil {
 		return err
 	}
-	if len(reconciled) > 0 {
-		warn(reconciledWarning(req.Table, p.recordKey, reconciled, deleted))
+	switch {
+	case len(found) == 0:
+	case len(found) == 1 && len(batch.Records) == 1:
+		warn(reconciledWarning(batch.Table, found[0].record.recordKey, found[0].changes, found[0].deleted))
+	default:
+		warn(reconciledRecordsWarning(batch.Table, found))
 	}
 	return nil
 }
 
-func reconciliation(ctx context.Context, tx db.Tx, table string, p plan) ([]db.FieldChange, bool, error) {
-	projected, err := tx.ProjectedRow(ctx, table, p.recordKey)
+func writeRecord(ctx context.Context, tx db.Tx, batch Batch, columns map[string]db.Column, record recordPlan, runID int64, at time.Time) ([]db.FieldChange, bool, error) {
+	reconciled, deleted, err := reconciliation(ctx, tx, batch.Table, columns, record)
+	if err != nil {
+		return nil, false, err
+	}
+	if len(reconciled) > 0 {
+		if err := tx.AppendHistory(ctx, batch.Table, record.recordKey, reconciled, runID, at, db.SourceReconciled); err != nil {
+			return nil, false, err
+		}
+	}
+
+	changes, err := tx.Upsert(ctx, batch.Table, record.key, record.Values, batch.Mode)
+	if err != nil {
+		return nil, false, err
+	}
+	if len(changes) > 0 {
+		if err := tx.AppendHistory(ctx, batch.Table, record.recordKey, changes, runID, at, db.SourceScribo); err != nil {
+			return nil, false, err
+		}
+	}
+	return reconciled, deleted, nil
+}
+
+func reconciliation(ctx context.Context, tx db.Tx, table string, columns map[string]db.Column, record recordPlan) ([]db.FieldChange, bool, error) {
+	projected, err := tx.ProjectedRow(ctx, table, record.recordKey)
 	if err != nil {
 		return nil, false, err
 	}
 	for field := range projected {
-		if _, ok := p.columns[field]; !ok {
+		if _, ok := columns[field]; !ok {
 			delete(projected, field)
 		}
 	}
@@ -218,7 +291,7 @@ func reconciliation(ctx context.Context, tx db.Tx, table string, p plan) ([]db.F
 	}
 	sort.Strings(fields)
 
-	current, found, err := tx.SelectRow(ctx, table, p.key, fields)
+	current, found, err := tx.SelectRow(ctx, table, record.key, fields)
 	if err != nil {
 		return nil, false, err
 	}
@@ -245,6 +318,61 @@ func reconciledWarning(table, recordKey string, changes []db.FieldChange, delete
 		Message: message,
 		Context: "record " + recordKey,
 	}
+}
+
+func reconciledRecordsWarning(table string, found []reconciledRecord) exitcode.Warning {
+	names := make([]string, len(found))
+	for i, record := range found {
+		names[i] = record.record.Name
+		if names[i] == "" {
+			names[i] = record.record.recordKey
+		}
+	}
+	noun := "records"
+	if len(names) == 1 {
+		noun = "record"
+	}
+	return exitcode.Warning{
+		Code:    exitcode.CodeHistoryReconciled,
+		Message: fmt.Sprintf("%s: %d %s reconciled: %s", table, len(names), noun, strings.Join(names, ", ")),
+		Context: "changes made outside Scribo were found and recorded in the history",
+	}
+}
+
+func inRecord(record Record, field string, err error) error {
+	var domain *exitcode.Error
+	if record.Name == "" || !errors.As(err, &domain) {
+		return err
+	}
+	where := describeKey(record.Key)
+	if field != "" {
+		where += fmt.Sprintf(", metric %q", field)
+	}
+	return exitcode.New(domain.Status, domain.Code, where+": "+domain.Message, domain.Context)
+}
+
+func describeKey(key db.Key) string {
+	names := sortedNames(key, nil)
+	parts := make([]string, len(names))
+	for i, name := range names {
+		parts[i] = name + " " + key[name].Raw
+	}
+	return strings.Join(parts, ", ")
+}
+
+func fieldNames(records []Record) []string {
+	seen := map[string]bool{}
+	var names []string
+	for _, record := range records {
+		for _, name := range sortedNames(record.Key, record.Values) {
+			if !seen[name] {
+				seen[name] = true
+				names = append(names, name)
+			}
+		}
+	}
+	sort.Strings(names)
+	return names
 }
 
 func statusOf(err error) int {
