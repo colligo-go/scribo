@@ -180,3 +180,16 @@ func TestMissingTableSuggestsByPrefix(t *testing.T) {
 		t.Errorf("stderr = %q, want the suggestion by prefix", got.Stderr)
 	}
 }
+
+func TestKeyMismatchListsSeveralColumnsInPlural(t *testing.T) {
+	t.Parallel()
+	path := seeded(t)
+
+	got := upsert(t, path, "--key", "note=x", "--key", "run_date=y", "Mapped_Reads=1")
+
+	requireFailure(t, got, 2, "key_mismatch")
+	want := "the key of rnaseq_qc is (replicate, sample); replicate, sample are missing; note, run_date are not part of it"
+	if !strings.Contains(got.Stderr, want) {
+		t.Errorf("stderr = %q, want it to contain %q", got.Stderr, want)
+	}
+}

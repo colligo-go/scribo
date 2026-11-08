@@ -133,6 +133,13 @@ func TestSchemaRefusals(t *testing.T) {
 	duplicated := writeTemp(t, "duplicated.tsv", "sample\tValue\tvalue\nS1\t1\t2\n")
 	notJSON := writeTemp(t, "multiqc_data.json", `{"report_general_stats_data": `)
 	missing := filepath.Join(t.TempDir(), "missing.json")
+	empty := writeTemp(t, "empty.tsv", "")
+	unnamed := writeTemp(t, "unnamed.tsv", "sample\t\tvalue\nS1\t1\t2\n")
+	colliding := writeTemp(t, "multiqc_data.json", `{
+	  "report_general_stats_headers": {"tool": {"Reads": {"namespace": "Tool"}, "reads": {}}},
+	  "report_general_stats_data": {"tool": {"S1": {"Reads": 1, "reads": 2}}}
+	}`)
+	directory := t.TempDir()
 	tests := []struct {
 		name     string
 		args     []string
@@ -153,6 +160,14 @@ func TestSchemaRefusals(t *testing.T) {
 		{"module with tsv", []string{"--from", tsv, "--table", "t", "--key", "sample", "--module", "fastp"}, 1, "usage", nil},
 		{"no table", []string{"--from-multiqc", multiqcFixture}, 1, "usage", []string{"--table"}},
 		{"reserved table", []string{"--from-multiqc", multiqcFixture, "--table", "tool_runs"}, 2, "reserved_table", nil},
+		{"empty module", []string{"--from-multiqc", multiqcFixture, "--table", "t", "--module", ""}, 1, "usage", []string{"--module needs a module name"}},
+		{"empty key", []string{"--from", tsv, "--table", "t", "--key", ""}, 1, "usage", []string{"--key needs a column name"}},
+		{"key twice", []string{"--from", tsv, "--table", "t", "--key", "sample", "--key", "sample"}, 1, "usage", []string{`key column "sample" is given twice`}},
+		{"empty tsv", []string{"--from", empty, "--table", "t", "--key", "sample"}, 4, "invalid_format", []string{"the file is empty"}},
+		{"column without a name", []string{"--from", unnamed, "--table", "t", "--key", "sample"}, 4, "invalid_format", []string{"empty name"}},
+		{"metrics equal but for case", []string{"--from-multiqc", colliding, "--table", "t", "--module", "tool"}, 4, "invalid_format", []string{"Reads and reads name the same column"}},
+		{"tsv is a directory", []string{"--from", directory, "--table", "t", "--key", "sample"}, 5, "io_error", []string{"cannot read " + directory}},
+		{"report is a directory", []string{"--from-multiqc", directory, "--table", "t"}, 5, "io_error", []string{"cannot read " + directory}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

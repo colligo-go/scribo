@@ -324,9 +324,6 @@ func reconciledRecordsWarning(table string, found []reconciledRecord) exitcode.W
 	names := make([]string, len(found))
 	for i, record := range found {
 		names[i] = record.record.Name
-		if names[i] == "" {
-			names[i] = record.record.recordKey
-		}
 	}
 	noun := "records"
 	if len(names) == 1 {

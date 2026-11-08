@@ -393,6 +393,35 @@ func TestIngestAggregatesTheReconciliationWarning(t *testing.T) {
 	}
 }
 
+func TestIngestRefusesOneMissingColumnByName(t *testing.T) {
+	t.Parallel()
+	path := newDB(t, golden(t, fastpGolden), `ALTER TABLE fastp_qc DROP COLUMN pct_adapter`)
+
+	got := ingest(t, path, "fastp_qc", multiqcFixture, "--module", "fastp")
+
+	requireFailure(t, got, 2, "column_not_found")
+	if !strings.Contains(got.Stderr, "column pct_adapter does not exist in fastp_qc") {
+		t.Errorf("stderr = %q", got.Stderr)
+	}
+	if n := count(t, path, "fastp_qc"); n != "0" {
+		t.Errorf("fastp_qc has %s rows, want 0", n)
+	}
+}
+
+func TestIngestNamesTheOneRecordReconciledAmongMany(t *testing.T) {
+	t.Parallel()
+	path := newDB(t, golden(t, fastpGolden))
+	requireSuccess(t, ingest(t, path, "fastp_qc", multiqcFixture, "--module", "fastp"))
+	mustExec(t, path, "UPDATE fastp_qc SET pct_duplication = 99 WHERE sample = 'HG001'")
+
+	got := ingest(t, path, "fastp_qc", multiqcFixture, "--module", "fastp")
+
+	requireWarnings(t, got, "history_reconciled")
+	if !strings.Contains(got.Stderr, "fastp_qc: 1 record reconciled: HG001\n") {
+		t.Errorf("stderr = %q", got.Stderr)
+	}
+}
+
 func TestIngestModuleWithoutAVersion(t *testing.T) {
 	t.Parallel()
 	path := newDB(t, schemaFor(t, "star_qc", "--module", "star"))
