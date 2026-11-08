@@ -12,9 +12,8 @@ import (
 )
 
 const (
-	TypeInteger = "INTEGER"
-	TypeReal    = "REAL"
-	TypeText    = "TEXT"
+	TypeReal = "REAL"
+	TypeText = "TEXT"
 )
 
 type Column struct {

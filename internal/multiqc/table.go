@@ -127,11 +127,8 @@ func columnType(cells map[string]cell) string {
 	if !present {
 		return TypeText
 	}
-	switch widest {
-	case kindInteger:
-		return TypeInteger
-	case kindReal:
-		return TypeReal
+	if widest == kindText {
+		return TypeText
 	}
-	return TypeText
+	return TypeReal
 }

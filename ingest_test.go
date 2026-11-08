@@ -285,9 +285,10 @@ func TestIngestRefusesAMissingColumnAndWritesNothing(t *testing.T) {
 
 func TestIngestRefusesAValueOfTheLastSampleAndWritesNoSample(t *testing.T) {
 	t.Parallel()
-	path := newDB(t, schemaFor(t, "cutadapt_qc", "--module", "cutadapt"))
+	ddl := strings.Replace(schemaFor(t, "cutadapt_qc", "--module", "cutadapt"), `"bp_processed" REAL`, `"bp_processed" INTEGER`, 1)
+	path := newDB(t, ddl)
 	if got := tableColumns(t, path, "cutadapt_qc")["bp_processed"].DeclaredType; got != "INTEGER" {
-		t.Fatalf("bp_processed is %s, want INTEGER", got)
+		t.Fatalf("bp_processed is %s, want INTEGER in the hand-edited table", got)
 	}
 	altered := alteredFixture(t, "cutadapt", "SRR1067505_1", "bp_processed", "1104515280.5")
 	before := snapshot(t, path, "cutadapt_qc")

@@ -158,8 +158,8 @@ func TestModuleCutadaptTakesTheVersionFromTheGeneralData(t *testing.T) {
 	if slices.Contains(columnNames(table), "cutadapt_version") {
 		t.Error("cutadapt_version is a column")
 	}
-	if got := typeOf(t, table, "bp_processed"); got != TypeInteger {
-		t.Errorf("bp_processed is %s, want INTEGER", got)
+	if got := typeOf(t, table, "bp_processed"); got != TypeReal {
+		t.Errorf("bp_processed is %s, want REAL", got)
 	}
 }
 
@@ -202,7 +202,7 @@ const twoSamples = `{
   "report_general_stats_data": {"tool": {"S1": {"m": %s}, "S2": {"m": %s}}}
 }`
 
-func TestColumnTypeFollowsTheJSONText(t *testing.T) {
+func TestNumericColumnsAreReal(t *testing.T) {
 	tests := []struct {
 		name   string
 		first  string
@@ -210,12 +210,13 @@ func TestColumnTypeFollowsTheJSONText(t *testing.T) {
 		want   string
 	}{
 		{"integral float and integer", "593374960.0", "12", TypeReal},
-		{"integers", "12", "13", TypeInteger},
+		{"integers", "12", "13", TypeReal},
 		{"exponent", "12", "1e3", TypeReal},
 		{"text", "1", `"n/a"`, TypeText},
 		{"bool", "1", "true", TypeText},
 		{"null", "null", "null", TypeText},
-		{"integer and null", "7", "null", TypeInteger},
+		{"zeros, as fastqc.percent_duplicates in the fixture", "0", "0", TypeReal},
+		{"integer and null", "7", "null", TypeReal},
 		{"overflowing integer", "12", "10000000000000000000", TypeReal},
 	}
 	for _, tt := range tests {

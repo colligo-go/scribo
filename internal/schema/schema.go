@@ -100,15 +100,8 @@ func widen(current, cell string) string {
 	if cell == "" || current == multiqc.TypeText {
 		return current
 	}
-	bound, err := db.Coerce(realColumn, db.Value{Raw: cell})
-	switch {
-	case err != nil:
+	if _, err := db.Coerce(realColumn, db.Value{Raw: cell}); err != nil {
 		return multiqc.TypeText
-	case current == multiqc.TypeReal:
-		return current
-	}
-	if _, isInteger := bound.(int64); isInteger {
-		return multiqc.TypeInteger
 	}
 	return multiqc.TypeReal
 }

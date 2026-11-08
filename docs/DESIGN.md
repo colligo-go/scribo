@@ -166,7 +166,7 @@ Chronological ordering is always `(changed_at, id)`.
 
 ### `schema` generates, it does not create
 
-`scribo schema --from file.tsv` and `--from-multiqc` **print** the `CREATE TABLE`. Scribo never creates a data table. The DDL is deterministic, so it can be versioned and reviewed in a diff, and `STRICT`, so the types it chose are enforced. A column's type is read from the text of each value, not from its parsed number: MultiQC writes counts as `593374960.0`, and a column inferred as `INTEGER` from it would refuse the next report that writes `593374960.5`, or keep a number MultiQC never wrote. `REAL` holds both; since floats render in plain decimal (SPEC §7), the count still reads `593374960`.
+`scribo schema --from file.tsv` and `--from-multiqc` **print** the `CREATE TABLE`. Scribo never creates a data table. The DDL is deterministic, so it can be versioned and reviewed in a diff, and `STRICT`, so the types it chose are enforced. Every numeric column it prints is `REAL`, never `INTEGER`. Inferring a type from the values of one report is guessing: an `INTEGER` inferred from `0` in every sample refuses the `12.5` of the next run, and one inferred from `35` refuses a mean of `35.29`. `REAL` holds every integer up to 2^53 exactly, and since floats render in plain decimal (SPEC §7), a count still reads `593374960`. Nothing is lost, and no later report is refused by a guess; whoever wants `INTEGER` edits the DDL, which `schema` prints for review.
 
 ### `--where` filters: basic operators, not SQL
 

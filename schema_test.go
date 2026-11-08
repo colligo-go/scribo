@@ -100,9 +100,9 @@ func TestSchemaFromTSV(t *testing.T) {
 
 	want := `CREATE TABLE "rnaseq_qc" (
   "sample" TEXT NOT NULL,
-  "replicate" INTEGER NOT NULL,
+  "replicate" REAL NOT NULL,
   "Alignment_Rate" REAL,
-  "Mapped_Reads" INTEGER,
+  "Mapped_Reads" REAL,
   "note" TEXT,
   UNIQUE ("sample", "replicate")
 ) STRICT;
