@@ -80,7 +80,7 @@ House style. Inviolable during implementation. Short on purpose.
 
 **A test written together with the code.** `-race -count=2` mandatory.
 
-**Combined coverage has a floor.** `.github/check-coverage.sh` merges the unit tests with the binary built with `-cover` while the integration tests run, because `go test -cover` does not see a binary run as a subprocess. CI fails under the number in `.github/coverage-floor`, which only rises, and fails when any function has 0%.
+**Combined coverage has a floor.** `.github/check-coverage.sh` merges the unit tests with the binary built with `-cover` while the integration tests run, because `go test -cover` does not see a binary run as a subprocess. CI fails under the number in `.github/coverage-floor`, which only rises, and fails when any function has 0%. The number is the one measured with the Go version of `go.mod` (`GOTOOLCHAIN=go<version> bash .github/check-coverage.sh`), since another release counts the blocks differently.
 
 ---
 

@@ -162,3 +162,15 @@ func TestIngestIntoAMissingTableSuggestsSchema(t *testing.T) {
 		t.Errorf("stderr = %q", got.Stderr)
 	}
 }
+
+func TestIngestOfAModuleTheReportLacks(t *testing.T) {
+	t.Parallel()
+	path := newDB(t, golden(t, fastpGolden))
+
+	got := ingest(t, path, "fastp_qc", multiqcFixture, "--module", "nope")
+
+	requireFailure(t, got, 4, "module_not_found")
+	if !strings.Contains(got.Stderr, "modules: cutadapt, fastp, fastqc, salmon, star") {
+		t.Errorf("stderr = %q", got.Stderr)
+	}
+}
